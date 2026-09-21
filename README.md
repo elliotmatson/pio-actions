@@ -56,6 +56,26 @@ combined at their flash offsets. The per-repo workflows left it in the build
 directory, so flashing a board from a release meant three files and three
 offsets. It is now published as `<env>-<version>-factory.bin`.
 
+**Pull requests get a size diff.** On a `pull_request`, the workflow also
+builds the base commit and posts a comment with the flash, RAM and image delta
+per environment, the app-partition percentage before and after, and a collapsed
+per-section breakdown of what moved. The comment is updated in place rather than
+appended, and the baseline is cached against the base commit so it is built once
+per pull request rather than on every push to the branch.
+
+The baseline is built with the *head* version string on purpose: a different
+`FW_VERSION` is a different number of bytes of `.rodata`, and that noise would
+otherwise appear in the diff as though the change had caused it.
+
+Growth alone never fails the job — reviewers should see a delta, not be blocked
+by one. The job fails only when an image reaches `size-fail-pct` of its app
+partition (default 95%) or can no longer flash at all.
+
+Grant the calling job `pull-requests: write` for the comment. Without it the
+diff still lands in the job summary and the step warns. A pull request from a
+fork cannot be commented on from the `pull_request` event at all; that needs the
+`workflow_run` pattern, which is not built yet.
+
 **Every build is measured.** Each environment emits a manifest with image size,
 flash/RAM section totals, and the percentage of the app partition consumed —
 read from the project's real partition table, including framework-shipped ones
