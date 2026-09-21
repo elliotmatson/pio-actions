@@ -54,6 +54,9 @@ jobs:
     uses: ./.github/workflows/build-release.yml
     permissions:
       contents: read
+      # Needed by the size-diff comment. Without it the diff still reaches the
+      # job summary, so this is an upgrade rather than a requirement.
+      pull-requests: write
     with:
       project-dir: examples/blink
       release-type: build

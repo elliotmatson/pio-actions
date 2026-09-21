@@ -55,6 +55,21 @@ on:
       cache-packages:
         type: boolean
         default: true
+      size-diff:
+        description: >-
+          On pull requests, build the base commit too and post the flash/RAM
+          delta as a comment. The calling job needs pull-requests: write for the
+          comment; without it the diff still lands in the job summary.
+        type: boolean
+        default: true
+      size-warn-bytes:
+        description: Image growth at or above this many bytes is flagged.
+        type: number
+        default: 2048
+      size-fail-pct:
+        description: Fail when an image reaches this percent of its app partition.
+        type: number
+        default: 95
       actions-ref:
         description: >-
           Which pio-actions ref supplies the composite actions. Consumers leave
@@ -220,6 +235,176 @@ jobs:
           path: ${{ inputs.project-dir }}/dist/*
           retention-days: ${{ inputs.retention-days }}
           if-no-files-found: error
+
+  base-size:
+    name: baseline size
+    needs: discover
+    if: ${{ inputs.size-diff && github.event_name == 'pull_request' }}
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    # A baseline that will not build must not red the pull request. The diff
+    # degrades to absolute sizes and says so.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJSON(needs.discover.outputs.envs) }}
+    steps:
+      # Keyed on the base commit, so the baseline is built once per PR rather
+      # than again on every push to the branch.
+      - name: Restore cached baseline
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: base-manifests
+          key: size-base-${{ runner.os }}-${{ matrix.env }}-${{ github.event.pull_request.base.sha }}
+
+      - uses: actions/checkout@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: ${{ inputs.fetch-depth }}
+
+      - name: Check out pio-actions
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: elliotmatson/pio-actions
+          ref: ${{ inputs.actions-ref }}
+          path: .pio-actions
+
+      - uses: ./.pio-actions/actions/setup-pio
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          pio-version: ${{ inputs.pio-version }}
+          python-version: ${{ inputs.python-version }}
+          project-dir: ${{ inputs.project-dir }}
+          cache-packages: ${{ inputs.cache-packages }}
+          gh-token: ${{ secrets.gh-token }}
+
+      - name: Build baseline ${{ matrix.env }}
+        if: steps.cache.outputs.cache-hit != 'true'
+        working-directory: ${{ inputs.project-dir }}
+        env:
+          # Deliberately the *head* version string. A different one would be a
+          # different number of bytes of .rodata, and that noise would show up
+          # in the diff as though the change had caused it.
+          PLATFORMIO_BUILD_FLAGS: >-
+            -DFW_VERSION='"${{ needs.discover.outputs.version }}"'
+            -DFW_TYPE='"${{ inputs.release-type }}"'
+            -DREPO_URL='"${{ github.repository }}"'
+        run: pio run -e "${{ matrix.env }}"
+
+      - name: Measure baseline
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.pio-actions/actions/firmware-size
+        with:
+          env: ${{ matrix.env }}
+          project-dir: ${{ inputs.project-dir }}
+          output: base-manifests/${{ matrix.env }}-manifest.json
+          summary: "false"
+
+      # Only after a clean build, so a failed baseline cannot poison the key
+      # with an empty directory that later runs would treat as a hit.
+      - name: Cache the baseline
+        if: success() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: base-manifests
+          key: size-base-${{ runner.os }}-${{ matrix.env }}-${{ github.event.pull_request.base.sha }}
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: base-manifest-${{ matrix.env }}
+          path: base-manifests/${{ matrix.env }}-manifest.json
+          retention-days: 1
+          if-no-files-found: warn
+
+  size-diff:
+    name: size diff
+    needs:
+      - discover
+      - build
+      - base-size
+    if: ${{ always() && inputs.size-diff && github.event_name == 'pull_request' && needs.build.result == 'success' }}
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Check out pio-actions
+        uses: actions/checkout@v4
+        with:
+          repository: elliotmatson/pio-actions
+          ref: ${{ inputs.actions-ref }}
+          path: .pio-actions
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          merge-multiple: true
+          path: head
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: base-manifest-*
+          merge-multiple: true
+          path: base
+
+      - name: Render the size diff
+        id: diff
+        # Failure here means the image outgrew its partition. Report that after
+        # the comment is posted, so the reviewer can see the numbers.
+        continue-on-error: true
+        # Values reach the script through the environment rather than being
+        # interpolated into the shell.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          WARN_BYTES: ${{ inputs.size-warn-bytes }}
+          FAIL_PCT: ${{ inputs.size-fail-pct }}
+        run: |
+          mkdir -p base
+          python3 .pio-actions/scripts/size_diff.py \
+            --head head --base base \
+            --base-label "\`$BASE_SHA\`" \
+            --warn-bytes "$WARN_BYTES" \
+            --fail-pct "$FAIL_PCT" \
+            --output size-comment.md
+
+      - name: Post or update the size comment
+        if: hashFiles('size-comment.md') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          marker='<!-- pio-actions:size-diff -->'
+          # Python rather than jq: the comment body is arbitrary markdown and
+          # this keeps the quoting entirely out of the shell.
+          python3 -c 'import json;print(json.dumps({"body":open("size-comment.md").read()}))' > payload.json
+
+          existing=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" \
+            --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty" \
+            2>/dev/null || true)
+
+          if [ -n "$existing" ]; then
+            target="repos/$REPO/issues/comments/$existing"; method=PATCH
+          else
+            target="repos/$REPO/issues/$PR/comments"; method=POST
+          fi
+
+          if ! gh api -X "$method" "$target" --input payload.json >/dev/null; then
+            echo "::warning::Could not post the size comment. Grant the calling \
+          job pull-requests: write, or read the diff in the job summary above. \
+          A pull request from a fork cannot be commented on from this event."
+          fi
+
+      - name: Fail if an image outgrew its partition
+        if: steps.diff.outcome == 'failure'
+        run: |
+          echo "::error::the size diff reported a partition problem; see the comment"
+          exit 1
 
   release:
     needs:
