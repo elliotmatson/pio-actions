@@ -113,8 +113,16 @@ jobs:
           read -ra extra <<< "$CHECK_FLAGS"
           # Never fail here: a defect above the threshold is reported by the
           # next step, after the annotations and the comment have been written.
-          pio check --json-output "${args[@]}" "${extra[@]}" > check-raw.txt || true
-          wc -l < check-raw.txt
+          pio check --json-output "${args[@]}" "${extra[@]}" \
+            > check-raw.txt 2> check-err.txt || true
+
+          # Redirecting stdout hides why a tool failed, which is the one thing
+          # worth seeing when it does. Both streams are small.
+          echo "--- pio check stderr ---"
+          cat check-err.txt || true
+          echo "--- pio check stdout (truncated) ---"
+          head -c 4000 check-raw.txt || true
+          echo
 
       - name: Report
         id: report

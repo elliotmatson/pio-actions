@@ -102,11 +102,14 @@ def collect_defects(results: list[dict], root: str = ".") -> list[dict]:
 
 def failed_tools(results: list[dict]) -> list[str]:
     """Tools that did not run. A crashed analyser is not a clean report."""
-    return [
-        f"{r.get('tool', '?')} on {r.get('env', '?')}"
-        for r in results
-        if r.get("succeeded") is False
-    ]
+    out = []
+    for r in results:
+        if r.get("succeeded") is not False:
+            continue
+        detail = r.get("message") or r.get("error") or ""
+        label = f"{r.get('tool', '?')} on {r.get('env', '?')}"
+        out.append(f"{label}: {detail}" if detail else label)
+    return out
 
 
 def counts(defects: list[dict]) -> dict[str, int]:
