@@ -170,3 +170,94 @@ def test_manifests_are_keyed_by_the_env_they_describe(tmp_path):
 
 def test_an_empty_directory_loads_nothing(tmp_path):
     assert load_manifests(str(tmp_path)) == {}
+
+
+# --- symbols -----------------------------------------------------------------
+
+def with_symbols(env, syms, truncated=False):
+    m = manifest(env, 271_000)
+    m["symbols"] = syms
+    m["symbols_truncated"] = truncated
+    return m
+
+
+def test_symbol_growth_is_attributed_to_the_symbol():
+    from scripts.size_diff import symbol_deltas
+
+    rows = symbol_deltas(
+        with_symbols("e", {"loop": 900, "setup": 200}),
+        with_symbols("e", {"loop": 400, "setup": 200}),
+    )
+    assert rows == [("loop", 400, 900, 500)]
+
+
+def test_symbols_added_and_removed_are_both_reported():
+    from scripts.size_diff import symbol_deltas
+
+    rows = dict((r[0], r[3]) for r in symbol_deltas(
+        with_symbols("e", {"added": 300}), with_symbols("e", {"gone": 128})))
+    assert rows == {"added": 300, "gone": -128}
+
+
+def test_symbol_rows_are_ordered_by_magnitude_then_name():
+    from scripts.size_diff import symbol_deltas
+
+    rows = symbol_deltas(
+        with_symbols("e", {"a": 100, "b": 500, "c": 100}),
+        with_symbols("e", {"a": 0, "b": 0, "c": 0}),
+    )
+    assert [r[0] for r in rows] == ["b", "a", "c"]
+
+
+def test_a_manifest_without_symbols_yields_no_symbol_rows():
+    from scripts.size_diff import symbol_deltas
+
+    assert symbol_deltas(manifest("e", 100), manifest("e", 100)) == []
+    assert symbol_deltas(with_symbols("e", {"x": 1}), None) == []
+
+
+def test_truncation_is_disclosed_when_either_side_was_truncated():
+    d = diff_env("e", with_symbols("e", {"x": 2}, truncated=True),
+                 with_symbols("e", {"x": 1}))
+    body = render([d], "abc", 2048, [])
+    assert "Only the largest symbols are recorded" in body
+
+
+def test_no_truncation_note_when_both_lists_are_complete():
+    d = diff_env("e", with_symbols("e", {"x": 2}), with_symbols("e", {"x": 1}))
+    body = render([d], "abc", 2048, [])
+    assert "Only the largest symbols are recorded" not in body
+
+
+def test_a_pipe_in_a_symbol_name_cannot_break_the_table():
+    d = diff_env("e", with_symbols("e", {"op|weird": 200}),
+                 with_symbols("e", {"op|weird": 100}))
+    body = render([d], "abc", 2048, [])
+    # Escaped, so the pipe renders as text instead of opening a sixth cell.
+    assert r"op\|weird" in body
+
+
+def test_demangling_falls_back_to_the_raw_name_when_cxxfilt_is_missing(monkeypatch):
+    import scripts.size_diff as sd
+
+    def boom(*a, **k):
+        raise OSError("no c++filt here")
+
+    monkeypatch.setattr(sd.subprocess, "run", boom)
+    assert sd.demangle(["_ZN5Blink6updateEj"]) == {"_ZN5Blink6updateEj": "_ZN5Blink6updateEj"}
+
+
+def test_demangling_refuses_a_mismatched_response(monkeypatch):
+    import scripts.size_diff as sd
+
+    class Result:
+        stdout = "only one line\n"
+
+    monkeypatch.setattr(sd.subprocess, "run", lambda *a, **k: Result())
+    # Two names in, one line out: pairing them would mislabel a symbol.
+    assert sd.demangle(["a", "b"]) == {"a": "a", "b": "b"}
+
+
+def test_the_ram_caveat_is_stated_in_the_footer():
+    body = render([diff_env("e", manifest("e", 100), manifest("e", 100))], "abc", 2048, [])
+    assert "heap or stack" in body

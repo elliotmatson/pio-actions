@@ -13,6 +13,7 @@ import argparse
 import glob
 import json
 import os
+import subprocess
 import sys
 
 try:  # importable as a package (tests) or run as a script (the workflow)
@@ -22,6 +23,7 @@ except ImportError:  # pragma: no cover - exercised by the CLI path
 
 MARKER = "<!-- pio-actions:size-diff -->"
 MAX_SECTION_ROWS = 12
+MAX_SYMBOL_ROWS = 15
 
 
 def load_manifests(directory: str) -> dict[str, dict]:
@@ -63,6 +65,44 @@ def section_deltas(head: dict, base: dict | None) -> list[tuple[str, int, int, i
     return rows
 
 
+def demangle(names: list[str]) -> dict[str, str]:
+    """Map mangled C++ names to readable ones, in one c++filt pass.
+
+    Best effort: binutils is present on the runners, but a host without it
+    should get mangled names rather than no report.
+    """
+    if not names:
+        return {}
+    try:
+        done = subprocess.run(
+            ["c++filt"], input="\n".join(names),
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {n: n for n in names}
+
+    out = done.stdout.splitlines()
+    if len(out) != len(names):  # refuse to mispair names with their demangling
+        return {n: n for n in names}
+    return dict(zip(names, out))
+
+
+def symbol_deltas(head: dict, base: dict | None) -> list[tuple[str, int, int, int]]:
+    """Per-symbol (name, base, head, delta), biggest movers first."""
+    if base is None:
+        return []
+    head_s = head.get("symbols") or {}
+    base_s = base.get("symbols") or {}
+    rows = []
+    for name in set(head_s) | set(base_s):
+        h = head_s.get(name, 0)
+        b = base_s.get(name, 0)
+        if h != b:
+            rows.append((name, b, h, h - b))
+    rows.sort(key=lambda r: (-abs(r[3]), r[0]))
+    return rows
+
+
 def diff_env(env: str, head: dict, base: dict | None) -> dict:
     return {
         "env": env,
@@ -72,6 +112,9 @@ def diff_env(env: str, head: dict, base: dict | None) -> dict:
         "flash_delta": _delta(head, base, "flash_bytes"),
         "ram_delta": _delta(head, base, "ram_bytes"),
         "sections": section_deltas(head, base),
+        "symbols": symbol_deltas(head, base),
+        "symbols_truncated": bool(head.get("symbols_truncated")
+                                  or (base or {}).get("symbols_truncated")),
     }
 
 
@@ -152,14 +195,40 @@ def render(diffs: list[dict], base_label: str, warn_bytes: int,
         lines.append("</details>")
         lines.append("")
 
+    for d in diffs:
+        if not d["symbols"]:
+            continue
+        rows = d["symbols"][:MAX_SYMBOL_ROWS]
+        pretty = demangle([r[0] for r in rows])
+        hidden = len(d["symbols"]) - len(rows)
+        lines.append(f"<details><summary><code>{d['env']}</code> — "
+                     f"{len(d['symbols'])} symbol(s) changed</summary>")
+        lines.append("")
+        lines.append("| Symbol | Base | Head | Δ |")
+        lines.append("| --- | ---: | ---: | ---: |")
+        for name, b, h, delta in rows:
+            label = pretty.get(name, name).replace("|", "\\|")
+            lines.append(f"| `{label}` | {human(b)} | {human(h)} | {signed(delta)} |")
+        if hidden:
+            lines.append(f"| _+{hidden} more_ | | | |")
+        lines.append("")
+        if d["symbols_truncated"]:
+            lines.append("Only the largest symbols are recorded, so one near that "
+                         "cutoff can appear here without having changed.")
+            lines.append("")
+        lines.append("</details>")
+        lines.append("")
+
     if problems:
         lines.append("> [!CAUTION]")
         for p in problems:
             lines.append(f"> {p}")
         lines.append("")
 
-    lines.append(f"<sub>Baseline: {base_label}. Image size is `firmware.bin` "
-                 f"against the smaller app partition slot.</sub>")
+    lines.append(
+        f"<sub>Baseline: {base_label}. Image size is `firmware.bin` against the "
+        f"smaller app partition slot. RAM is static allocation only — the "
+        f"linker cannot see heap or stack.</sub>")
     return "\n".join(lines)
 
 

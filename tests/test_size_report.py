@@ -278,3 +278,42 @@ extends = a
 extends = a
 """)
     assert partitions_spec_for_env(str(tmp_path), "loop") == ""
+
+
+# --- symbol ranking ----------------------------------------------------------
+
+LIBRARY_HEAVY = {
+    "_vfprintf_r": 11520,   # newlib
+    "_svfprintf_r": 11305,
+    "port_IntStack": 4192,  # FreeRTOS
+    "loop": 84,             # the sketch
+    "setup": 96,
+}
+
+
+def test_every_symbol_is_kept_by_default():
+    from scripts.size_report import rank_symbols
+
+    assert set(rank_symbols(LIBRARY_HEAVY)) == set(LIBRARY_HEAVY)
+
+
+def test_symbols_come_back_largest_first():
+    from scripts.size_report import rank_symbols
+
+    assert list(rank_symbols(LIBRARY_HEAVY))[:2] == ["_vfprintf_r", "_svfprintf_r"]
+
+
+def test_equal_sizes_are_ordered_by_name_so_output_is_stable():
+    from scripts.size_report import rank_symbols
+
+    assert list(rank_symbols({"b": 10, "a": 10, "c": 10})) == ["a", "b", "c"]
+
+
+def test_a_limit_discards_application_code_which_is_why_it_is_off():
+    from scripts.size_report import rank_symbols
+
+    # The regression this guards: ranking by size keeps library internals and
+    # drops the sketch, so a reviewer sees no symbol moved when theirs did.
+    kept = rank_symbols(LIBRARY_HEAVY, limit=3)
+    assert "loop" not in kept and "setup" not in kept
+    assert set(kept) == {"_vfprintf_r", "_svfprintf_r", "port_IntStack"}

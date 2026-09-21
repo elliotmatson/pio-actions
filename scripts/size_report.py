@@ -50,6 +50,50 @@ def read_elf_sections(path: str) -> list[dict]:
     return out
 
 
+def rank_symbols(totals: dict[str, int], limit: int = 0) -> dict[str, int]:
+    """Order symbols by size, optionally keeping only the largest.
+
+    A limit is off by default, and should stay off. Ranking by size sounds
+    reasonable until you notice what it discards: an ESP32 image's largest
+    symbols are newlib and FreeRTOS internals in the multi-kilobyte range, so
+    any cutoff generous enough to be small still lands well above application
+    code. Capping at 500 on a blink sketch put the boundary at 100 bytes, which
+    hid every function in the sketch itself -- that is, precisely the symbols
+    whose movement a reviewer needs to see.
+    """
+    ranked = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    return dict(ranked[:limit]) if limit else dict(ranked)
+
+
+def read_elf_symbols(path: str, limit: int = 0) -> dict[str, int]:
+    """Every sized symbol in the image, largest first.
+
+    Sections say a change cost 4 KB of .flash.text; symbols say which function
+    it was. Only .symtab is read -- .dynsym would double-count the same symbol
+    -- and only sized FUNC/OBJECT entries, which excludes labels and sections.
+
+    The whole table runs to a couple of hundred kilobytes of JSON, which is
+    cheap next to being unable to answer the question.
+    """
+    from elftools.elf.elffile import ELFFile
+    from elftools.elf.sections import SymbolTableSection
+
+    totals: dict[str, int] = {}
+    with open(path, "rb") as fh:
+        for section in ELFFile(fh).iter_sections():
+            if not isinstance(section, SymbolTableSection) or section.name != ".symtab":
+                continue
+            for symbol in section.iter_symbols():
+                size = symbol["st_size"]
+                if not size or not symbol.name:
+                    continue
+                if symbol["st_info"]["type"] not in ("STT_FUNC", "STT_OBJECT"):
+                    continue
+                totals[symbol.name] = totals.get(symbol.name, 0) + size
+
+    return rank_symbols(totals, limit)
+
+
 def classify_sections(sections: list[dict]) -> dict:
     """Split allocated sections into flash cost and RAM cost.
 
@@ -209,7 +253,7 @@ def sha256(path: str) -> str:
 
 
 def build_manifest(build_dir: str, env: str, project_dir: str = ".",
-                   partitions: str = "") -> dict:
+                   partitions: str = "", symbols: int = 0) -> dict:
     elf = os.path.join(build_dir, "firmware.elf")
     binary = os.path.join(build_dir, "firmware.bin")
 
@@ -217,8 +261,12 @@ def build_manifest(build_dir: str, env: str, project_dir: str = ".",
 
     if os.path.isfile(elf):
         manifest.update(classify_sections(read_elf_sections(elf)))
+        manifest["symbols"] = read_elf_symbols(elf, symbols)
+        manifest["symbols_truncated"] = bool(symbols) and len(manifest["symbols"]) >= symbols
     else:
         manifest.update({"flash_bytes": None, "ram_bytes": None, "sections": {}})
+        manifest["symbols"] = {}
+        manifest["symbols_truncated"] = False
 
     manifest["bin_bytes"] = os.path.getsize(binary) if os.path.isfile(binary) else None
 
@@ -274,12 +322,16 @@ def main() -> int:
     ap.add_argument("--project-dir", default=".")
     ap.add_argument("--partitions", default="",
                     help="override board_build.partitions")
+    ap.add_argument("--symbols", type=int, default=0,
+                    help="keep only this many of the largest symbols; "
+                         "0 (the default) records them all")
     ap.add_argument("--output", default="", help="write the manifest JSON here")
     ap.add_argument("--summary", action="store_true",
                     help="append a one-line summary to $GITHUB_STEP_SUMMARY")
     args = ap.parse_args()
 
-    manifest = build_manifest(args.build_dir, args.env, args.project_dir, args.partitions)
+    manifest = build_manifest(args.build_dir, args.env, args.project_dir,
+                              args.partitions, args.symbols)
     text = json.dumps(manifest, indent=2, sort_keys=True)
 
     if args.output:
