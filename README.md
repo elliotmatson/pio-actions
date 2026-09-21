@@ -95,11 +95,55 @@ flash/RAM section totals, and the percentage of the app partition consumed —
 read from the project's real partition table, including framework-shipped ones
 like `huge_app.csv`. This is what the memory-diff workflow will diff.
 
+## Static analysis
+
+```yaml
+jobs:
+  analysis:
+    uses: elliotmatson/pio-actions/.github/workflows/static-analysis.yml@v1
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      fail-on: high
+    secrets:
+      gh-token: ${{ secrets.GH_PAT }}
+```
+
+Runs `pio check` and reports it where a reviewer is looking: inline annotations
+on the diff, a table in the job summary, and a comment updated in place on the
+pull request. `fail-on` gates the merge (`high` by default); everything below it
+is still reported.
+
+Code scanning would be the natural home for this, and `upload-sarif: true` still
+sends it there — but code scanning is a paid feature on private repositories, so
+it cannot be the default for firmware work. The free path is not a consolation
+prize here: annotations sit on the diff being reviewed rather than in a separate
+tab.
+
+Defects found in several environments are reported once, tagged with the
+environments they came from, so a shared header does not produce three
+identical annotations. A tool that fails to run is called out explicitly rather
+than passing as a clean report.
+
+Annotations are capped (50 by default) so a noisy first run cannot bury the
+diff; the rest stay in the summary and the comment.
+
+### What this replaces
+
+The per-repo `static-analysis.yml` pairs `pio check` with super-linter. On
+lp-p2p that super-linter job fails on **every** pull request — nine of its
+fourteen linters error unconditionally, `clang-format` and `checkov` among them,
+against an ESP-IDF tree that was never configured for them. A check that is
+always red is worse than no check, because it teaches everyone to ignore the
+column. This workflow deliberately does not include a whole-repo linter.
+
 ## Components
 
 | Path | Purpose |
 | --- | --- |
 | `.github/workflows/build-release.yml` | Reusable build + release workflow |
+| `.github/workflows/static-analysis.yml` | Reusable `pio check` reporting |
 | `actions/setup-pio` | Pinned PlatformIO, invalidating cache, private-lib git auth |
 | `actions/list-envs` | Environment discovery for the build matrix |
 | `actions/firmware-size` | Size manifest for one built environment |
@@ -172,8 +216,8 @@ Consumers pin `@v1`. Releases are `v1.x.y` with `v1` moved to the newest.
 1. ~~`setup-pio` + `build-release`, with `examples/blink` as a test fixture~~
 2. `memory-diff` — flash/RAM delta as a sticky PR comment, against a cached
    merge-base build
-3. `static-analysis` — `pio check` → SARIF → inline PR annotations
-4. `pio-update` — dependency bumps for registry libs, git-tagged libs and
-   pioarduino platform URLs, which Dependabot and Renovate don't cover
+3. ~~`static-analysis` — `pio check`, reported on the pull request~~
+4. ~~Dependency updates — handled by a fork of
+   VIPnytt/platformio-dependency-updater rather than built here~~
 5. Testing — `pio test -e native`, then on-target. `examples/blink` already
    shows the shape; the reusable workflow should generalize it.

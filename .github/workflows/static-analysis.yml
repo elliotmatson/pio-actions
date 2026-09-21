@@ -1,0 +1,176 @@
+# Reusable static analysis for PlatformIO / pioarduino firmware.
+#
+# Code scanning would be the natural home for this, but it is a paid feature on
+# private repositories. Output therefore goes where it costs nothing and where a
+# reviewer is already looking: inline annotations on the diff, a summary on the
+# run, and a comment on the pull request. SARIF upload stays available for
+# repositories that do have code scanning.
+name: static-analysis
+
+on:
+  workflow_call:
+    inputs:
+      envs:
+        description: '"default", "all", or an explicit list.'
+        type: string
+        default: default
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      python-version:
+        type: string
+        default: "3.12"
+      pio-version:
+        type: string
+        default: "6.1.19"
+      project-dir:
+        type: string
+        default: "."
+      fail-on:
+        description: >-
+          Fail the job on defects at or above this severity: high, medium, low,
+          or none. Everything below it is still reported.
+        type: string
+        default: high
+      max-annotations:
+        description: >-
+          Cap on inline annotations. The rest stay in the summary and comment,
+          so a noisy first run cannot bury the diff.
+        type: number
+        default: 50
+      comment:
+        description: >-
+          Post the report as a pull-request comment, updated in place. Needs
+          pull-requests: write on the calling job.
+        type: boolean
+        default: true
+      upload-sarif:
+        description: >-
+          Also upload SARIF to code scanning. Needs security-events: write and a
+          repository with code scanning enabled -- a paid feature on private
+          repositories, where this will fail.
+        type: boolean
+        default: false
+      check-flags:
+        description: Extra arguments passed through to `pio check`.
+        type: string
+        default: ""
+      cache-packages:
+        type: boolean
+        default: true
+      actions-ref:
+        type: string
+        default: v1
+    secrets:
+      gh-token:
+        required: false
+    outputs:
+      total:
+        description: Number of distinct defects found.
+        value: ${{ jobs.check.outputs.total }}
+
+jobs:
+  check:
+    name: pio check
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      total: ${{ steps.report.outputs.total }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out pio-actions
+        uses: actions/checkout@v4
+        with:
+          repository: elliotmatson/pio-actions
+          ref: ${{ inputs.actions-ref }}
+          path: .pio-actions
+
+      - id: envs
+        uses: ./.pio-actions/actions/list-envs
+        with:
+          project-dir: ${{ inputs.project-dir }}
+          select: ${{ inputs.envs }}
+
+      - uses: ./.pio-actions/actions/setup-pio
+        with:
+          pio-version: ${{ inputs.pio-version }}
+          python-version: ${{ inputs.python-version }}
+          project-dir: ${{ inputs.project-dir }}
+          cache-packages: ${{ inputs.cache-packages }}
+          gh-token: ${{ secrets.gh-token }}
+
+      - name: Run pio check
+        working-directory: ${{ inputs.project-dir }}
+        env:
+          ENVS_JSON: ${{ steps.envs.outputs.envs }}
+          CHECK_FLAGS: ${{ inputs.check-flags }}
+        run: |
+          set -uo pipefail
+          mapfile -t names < <(printf '%s' "$ENVS_JSON" \
+            | python3 -c 'import json,sys; [print(e) for e in json.load(sys.stdin)]')
+          args=()
+          for name in "${names[@]}"; do args+=(-e "$name"); done
+          read -ra extra <<< "$CHECK_FLAGS"
+          # Never fail here: a defect above the threshold is reported by the
+          # next step, after the annotations and the comment have been written.
+          pio check --json-output "${args[@]}" "${extra[@]}" > check-raw.txt || true
+          wc -l < check-raw.txt
+
+      - name: Report
+        id: report
+        continue-on-error: true
+        env:
+          PROJECT_DIR: ${{ inputs.project-dir }}
+          FAIL_ON: ${{ inputs.fail-on }}
+          MAX_ANNOTATIONS: ${{ inputs.max-annotations }}
+          WANT_SARIF: ${{ inputs.upload-sarif }}
+        run: |
+          set -uo pipefail
+          sarif_args=()
+          if [ "$WANT_SARIF" = "true" ]; then sarif_args=(--sarif check.sarif); fi
+          python3 .pio-actions/scripts/check_report.py \
+            --input "$PROJECT_DIR/check-raw.txt" \
+            --project-dir "$PROJECT_DIR" \
+            --fail-on "$FAIL_ON" \
+            --max-annotations "$MAX_ANNOTATIONS" \
+            --comment check-comment.md \
+            "${sarif_args[@]}"
+
+      - name: Upload SARIF
+        if: inputs.upload-sarif && hashFiles('check.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: check.sarif
+
+      - name: Post or update the analysis comment
+        if: inputs.comment && github.event_name == 'pull_request' && hashFiles('check-comment.md') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          marker='<!-- pio-actions:static-analysis -->'
+          python3 -c 'import json;print(json.dumps({"body":open("check-comment.md").read()}))' > payload.json
+
+          existing=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" \
+            --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty" \
+            2>/dev/null || true)
+
+          if [ -n "$existing" ]; then
+            target="repos/$REPO/issues/comments/$existing"; method=PATCH
+          else
+            target="repos/$REPO/issues/$PR/comments"; method=POST
+          fi
+
+          if ! gh api -X "$method" "$target" --input payload.json >/dev/null; then
+            echo "::warning::Could not post the analysis comment. Grant the calling \
+          job pull-requests: write, or read the report in the job summary above."
+          fi
+
+      - name: Fail on defects at or above the threshold
+        if: steps.report.outcome == 'failure'
+        run: |
+          echo "::error::static analysis reported defects at or above '${{ inputs.fail-on }}'"
+          exit 1
