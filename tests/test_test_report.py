@@ -143,3 +143,22 @@ def test_a_missing_report_fails_loudly(tmp_path):
     done = _run(tmp_path, path=str(tmp_path / "nope.xml"))
     assert done.returncode != 0
     assert "did not run" in (done.stdout + done.stderr)
+
+
+
+def test_suites_that_did_not_run_are_left_out_of_the_table(tmp_path):
+    # pio test emits a suite per environment/test pair, including environments
+    # this run did not select. A zero-test row reads as "ran, found nothing".
+    body = """<?xml version="1.0"?>
+<testsuites name="proj" tests="1" errors="0" failures="0" time="0.2">
+  <testsuite name="esp32dev:test_blink" tests="0" errors="0" failures="0" skipped="0" time="0.0"/>
+  <testsuite name="native:test_blink" tests="1" errors="0" failures="0" skipped="0" time="0.2">
+    <testcase name="works" time="0.2" status="PASSED"/>
+  </testsuite>
+</testsuites>
+"""
+    report = parse(write(tmp_path, body))
+    rendered = render_markdown(report, tally(report))
+    assert "`native:test_blink`" in rendered
+    assert "esp32dev:test_blink" not in rendered
+    assert "**1/1 passed**" in rendered

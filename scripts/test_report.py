@@ -112,6 +112,12 @@ def render_markdown(report: dict, counts: dict[str, int]) -> str:
     lines.append("| --- | ---: | ---: | ---: | ---: |")
     for suite in report["suites"]:
         n = len(suite["cases"])
+        # PlatformIO emits a suite for every environment/test pair in the
+        # project, including the ones this run did not select. Listing them as
+        # zero-test rows reads as "ran and found nothing", which is the very
+        # ambiguity the no-tests-ran guard exists to remove.
+        if not n:
+            continue
         failed = sum(1 for c in suite["cases"] if c["kind"])
         lines.append(f"| `{suite['name']}` | {n} | {n - failed} | {failed} | {suite['time']:.2f}s |")
     lines.append("")
