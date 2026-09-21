@@ -174,12 +174,44 @@ against an ESP-IDF tree that was never configured for them. A check that is
 always red is worse than no check, because it teaches everyone to ignore the
 column. This workflow deliberately does not include a whole-repo linter.
 
+## Testing
+
+```yaml
+jobs:
+  tests:
+    uses: elliotmatson/pio-actions/.github/workflows/test.yml@v1
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      envs: native
+    secrets:
+      gh-token: ${{ secrets.GH_PAT }}
+```
+
+Runs `pio test` and reports it with an annotation on each failing assertion, a
+summary table, and a comment updated in place. PlatformIO's JUnit output carries
+the file and line of every case, so a failure lands on the diff rather than in a
+log.
+
+`test_build_src` defaults to `no`, so a host environment compiles the libraries
+under `lib/` and the tests, leaving `src/main.cpp` and its `<Arduino.h>` out —
+which is what makes logic extracted from `loop()` testable without hardware.
+
+**A run that executed no tests fails.** A green test step for a suite that never
+ran is the same defect as a lint report for a file nobody opened, and it is the
+easier of the two to miss.
+
+Point `runs-on` at a self-hosted runner with a board attached to run the same
+suites on target.
+
 ## Components
 
 | Path | Purpose |
 | --- | --- |
 | `.github/workflows/build-release.yml` | Reusable build + release workflow |
 | `.github/workflows/static-analysis.yml` | Reusable `pio check` reporting |
+| `.github/workflows/test.yml` | Reusable `pio test` reporting |
 | `actions/setup-pio` | Pinned PlatformIO, invalidating cache, private-lib git auth |
 | `actions/list-envs` | Environment discovery for the build matrix |
 | `actions/firmware-size` | Size manifest for one built environment |
@@ -269,5 +301,4 @@ Consumers pin `@v1`. Releases are `v1.x.y` with `v1` moved to the newest.
 3. ~~`static-analysis` — `pio check`, reported on the pull request~~
 4. ~~Dependency updates — handled by a fork of
    VIPnytt/platformio-dependency-updater rather than built here~~
-5. Testing — `pio test -e native`, then on-target. `examples/blink` already
-   shows the shape; the reusable workflow should generalize it.
+5. ~~Testing — `pio test`, reported on the pull request~~

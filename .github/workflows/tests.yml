@@ -50,16 +50,14 @@ jobs:
 
   native:
     name: firmware unit tests (host)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./actions/setup-pio
-        with:
-          project-dir: examples/blink
-      # test_build_src defaults to no, so this compiles lib/blink and the test
-      # only -- src/main.cpp and its Arduino.h stay out of the host build.
-      - run: pio test -e native
-        working-directory: examples/blink
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      project-dir: examples/blink
+      envs: native
+      actions-ref: ${{ github.sha }}
 
   token-persistence:
     name: setup-pio exports its token
