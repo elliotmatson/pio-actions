@@ -50,6 +50,12 @@ forever, so bumping a platform silently reused the toolchain cache built for
 the previous one. Keys now hash `platformio.ini`, with `restore-keys` for a
 warm start on a miss.
 
+**The merged image ships too.** pioarduino writes a `firmware.factory.bin`
+alongside the app image — bootloader, partition table and application already
+combined at their flash offsets. The per-repo workflows left it in the build
+directory, so flashing a board from a release meant three files and three
+offsets. It is now published as `<env>-<version>-factory.bin`.
+
 **Every build is measured.** Each environment emits a manifest with image size,
 flash/RAM section totals, and the percentage of the app partition consumed —
 read from the project's real partition table, including framework-shipped ones

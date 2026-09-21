@@ -76,6 +76,13 @@ jobs:
 
       - run: ls -l dist
 
+      - name: Assert the merged factory image was published
+        run: |
+          for env in esp32dev esp32s3; do
+            ls dist/"$env"-*-factory.bin >/dev/null \
+              || { echo "::error::$env: no merged factory image staged"; exit 1; }
+          done
+
       - name: Assert the manifests describe a real build
         env:
           EXPECTED_ENVS: esp32dev esp32s3
@@ -103,7 +110,7 @@ jobs:
                   failures.append(f"{path} missing")
                   continue
               m = json.load(open(path))
-              print(json.dumps(m, indent=2, sort_keys=True)[:600])
+              print(json.dumps(m, indent=2, sort_keys=True))
 
               # An Arduino blink is a few hundred KB; anything tiny means the
               # image was not actually produced.
@@ -111,7 +118,15 @@ jobs:
                     f"{env}: implausible image size {m['bin_bytes']}")
               check(m["flash_bytes"] and m["flash_bytes"] > 0, f"{env}: no flash total")
               check(m["ram_bytes"] and m["ram_bytes"] > 0, f"{env}: no RAM total")
-              check(".text" in m["sections"], f"{env}: no .text section in breakdown")
+              # An ESP32 image has no plain .text: code lands in .flash.text and
+              # .iram0.text. Assert on what the classifier is for -- some code
+              # section exists, and the per-section numbers add up to the totals.
+              check(any("text" in name for name in m["sections"]),
+                    f"{env}: no code section in {sorted(m['sections'])}")
+              check(sum(s["flash"] for s in m["sections"].values()) == m["flash_bytes"],
+                    f"{env}: section flash figures do not sum to flash_bytes")
+              check(sum(s["ram"] for s in m["sections"].values()) == m["ram_bytes"],
+                    f"{env}: section RAM figures do not sum to ram_bytes")
 
               # The whole partition chain: read board_build.partitions, resolve
               # the CSV, pick the smaller OTA slot.
@@ -120,8 +135,10 @@ jobs:
               check(m["partition_pct"] and 0 < m["partition_pct"] < 100,
                     f"{env}: partition_pct {m['partition_pct']} out of range")
 
-              check(any(re.fullmatch(rf"{env}-.+\.bin", n) for n in m["artifacts"]),
-                    f"{env}: no firmware image in {list(m['artifacts'])}")
+              # The manifest is written before the staging step renames anything,
+              # so these are build-directory names.
+              check("firmware.bin" in m["artifacts"],
+                    f"{env}: no firmware.bin in {sorted(m['artifacts'])}")
               for name, meta in m["artifacts"].items():
                   check(re.fullmatch(r"[0-9a-f]{64}", meta["sha256"]),
                         f"{env}: bad sha256 for {name}")
