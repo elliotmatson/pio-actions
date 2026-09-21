@@ -67,6 +67,12 @@ jobs:
     name: verify size manifests
     needs: firmware
     runs-on: ubuntu-latest
+    env:
+      # The envs examples/blink builds by default. Declared once: two steps
+      # assert against it, and they must not be able to drift apart.
+      EXPECTED_ENVS: esp32dev esp32s3
+      # examples/blink/partitions.csv: app0 and app1 are both 0x1E0000.
+      EXPECTED_APP_PARTITION: "1966080"
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -78,16 +84,12 @@ jobs:
 
       - name: Assert the merged factory image was published
         run: |
-          for env in esp32dev esp32s3; do
+          for env in $EXPECTED_ENVS; do
             ls dist/"$env"-*-factory.bin >/dev/null \
               || { echo "::error::$env: no merged factory image staged"; exit 1; }
           done
 
       - name: Assert the manifests describe a real build
-        env:
-          EXPECTED_ENVS: esp32dev esp32s3
-          # examples/blink/partitions.csv: app0 and app1 are both 0x1E0000.
-          EXPECTED_APP_PARTITION: "1966080"
         run: |
           python3 - <<'PY'
           import glob, json, os, re, sys
