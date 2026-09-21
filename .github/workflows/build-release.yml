@@ -467,7 +467,8 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          sha256sum ./*.bin | tee SHA256SUMS
+          # Not ./*.bin: the prefix ends up in the published checksum file.
+          sha256sum -- *.bin | tee SHA256SUMS
           ls -l
 
       - uses: ncipollo/release-action@v1
