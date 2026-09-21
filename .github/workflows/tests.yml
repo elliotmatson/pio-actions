@@ -8,6 +8,18 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release-type:
+        description: >-
+          Exercise the release path. 'build' is the normal test run; 'beta' and
+          'stable' actually publish a release from the fixture firmware.
+        type: choice
+        options: [build, beta, stable]
+        default: build
+      release-version:
+        description: Tag to publish. Ignored unless release-type is beta or stable.
+        type: string
+        default: ""
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -53,13 +65,17 @@ jobs:
     name: build examples/blink
     uses: ./.github/workflows/build-release.yml
     permissions:
-      contents: read
+      # write, not read: a dispatched release run publishes from this job, and
+      # a reusable workflow's permissions are validated before any 'if' decides
+      # whether the release job runs at all.
+      contents: write
       # Needed by the size-diff comment. Without it the diff still reaches the
       # job summary, so this is an upgrade rather than a requirement.
       pull-requests: write
     with:
       project-dir: examples/blink
-      release-type: build
+      release-type: ${{ inputs.release-type || 'build' }}
+      release-version: ${{ inputs.release-version || '' }}
       envs: default
       # Test the actions from this commit rather than from the last tag, so a
       # pull request validates its own changes.
