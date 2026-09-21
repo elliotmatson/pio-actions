@@ -6,10 +6,17 @@ description: >-
 inputs:
   pio-version:
     description: >-
-      PlatformIO core version. Pinned rather than floating: PlatformIO 6.2.0
-      wants tool-scons ~4.41101.0 and installs it over the SCons 4.8.1 that
-      pioarduino pins, which breaks the build with "No module named
-      'SCons.Tool.FortranCommon'". Bump here once, for every repo.
+      PlatformIO core version, or "latest" to leave it unpinned.
+
+      The default is pinned because PlatformIO 6.2.0 wants tool-scons
+      ~4.41101.0 and installs it over the SCons 4.8.1 that pioarduino 55.03.311
+      and earlier pin, which breaks the build with "No module named
+      'SCons.Tool.FortranCommon'".
+
+      pioarduino 55.03.312 resolves that, and in turn requires Core >= 6.2.0 --
+      so a project on 55.03.312 or later must pass "latest", and the two
+      settings move together. Bump the default here once the repos have caught
+      up.
     default: "6.1.19"
   python-version:
     default: "3.12"
@@ -71,9 +78,15 @@ runs:
 
     - name: Install PlatformIO
       shell: bash
+      env:
+        PIO_VERSION: ${{ inputs.pio-version }}
       run: |
         python -m pip install --upgrade pip
-        pip install "platformio==${{ inputs.pio-version }}" pyelftools
+        if [ -z "$PIO_VERSION" ] || [ "$PIO_VERSION" = "latest" ]; then
+          pip install --upgrade platformio pyelftools
+        else
+          pip install "platformio==$PIO_VERSION" pyelftools
+        fi
         pio --version
 
     - name: Authenticate git for private libraries

@@ -171,6 +171,20 @@ column. This workflow deliberately does not include a whole-repo linter.
 
 ### The PlatformIO pin
 
+`setup-pio` pins PlatformIO by default and accepts `pio-version: latest` to
+leave it floating. The two settings are coupled to the platform, in opposite
+directions:
+
+| pioarduino platform | `6.1.19` | `latest` (6.2.x) |
+| --- | --- | --- |
+| 55.03.311 and earlier | works | `No module named 'SCons.Tool.FortranCommon'` |
+| 55.03.312 and later | `IncompatiblePlatform` | works |
+
+There is no single value that satisfies both, so a project bumping to 55.03.312
+has to pass `latest` in the same change. The default stays pinned until the
+repos have moved.
+
+
 `setup-pio` defaults to `platformio==6.1.19`, not `--upgrade`. PlatformIO 6.2.0
 requires `tool-scons ~4.41101.0` and installs it over the SCons 4.8.1 that
 pioarduino pins, which fails the build with `No module named
