@@ -82,6 +82,19 @@ jobs:
       actions-ref: ${{ github.sha }}
       retention-days: 7
 
+  analysis:
+    name: static analysis
+    uses: ./.github/workflows/static-analysis.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      project-dir: examples/blink
+      # One environment is enough to exercise the pipeline; checking all three
+      # would triple the run for no extra signal.
+      envs: esp32dev
+      actions-ref: ${{ github.sha }}
+
   verify:
     name: verify size manifests
     needs: firmware
