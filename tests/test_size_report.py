@@ -8,8 +8,8 @@ from scripts.size_report import (
     render_markdown,
 )
 
-# hub/partitions.csv: dual OTA, tab-separated, trailing commas, a comment header.
-HUB_PARTITIONS = """# Name,\tType,\tSubType,\tOffset,\tSize,\tFlags
+# Dual OTA, tab-separated, trailing commas, a comment header -- as written by hand.
+DUAL_OTA = """# Name,\tType,\tSubType,\tOffset,\tSize,\tFlags
 nvs,\tdata,\tnvs,\t0x9000,\t0x5000,\t
 otadata,\tdata,\tota,\t0xe000,\t0x2000,\t
 app0,\tapp,\tota_0,\t0x10000,\t0x1f0000,\t
@@ -89,13 +89,13 @@ def test_partition_sizes_parse_in_every_notation(raw, expected):
     assert parse_size(raw) == expected
 
 
-def test_parses_hubs_tab_separated_table():
-    rows = parse_partition_csv(HUB_PARTITIONS)
+def test_parses_a_tab_separated_table():
+    rows = parse_partition_csv(DUAL_OTA)
     assert [r["name"] for r in rows] == ["nvs", "otadata", "app0", "app1", "coredump"]
 
 
 def test_ota_ceiling_is_the_smaller_slot_not_their_sum():
-    rows = parse_partition_csv(HUB_PARTITIONS)
+    rows = parse_partition_csv(DUAL_OTA)
     assert app_partition_bytes(rows) == 0x1F0000
 
 
@@ -111,10 +111,10 @@ def test_table_without_app_partition_reports_no_ceiling():
 
 def test_markdown_states_the_percentage_when_a_ceiling_is_known():
     line = render_markdown({
-        "env": "hub", "bin_bytes": 1_048_576, "flash_bytes": 1_000_000,
+        "env": "app", "bin_bytes": 1_048_576, "flash_bytes": 1_000_000,
         "ram_bytes": 65_536, "app_partition_bytes": 0x1F0000, "partition_pct": 51.2,
     })
-    assert "hub" in line and "51.2%" in line
+    assert "app" in line and "51.2%" in line
 
 
 def test_markdown_degrades_when_no_partition_table_was_found():
@@ -127,7 +127,7 @@ def test_markdown_degrades_when_no_partition_table_was_found():
 
 # --- manifest assembly -------------------------------------------------------
 
-def _fake_project(tmp_path, ini_body, bin_bytes=200_000, partitions=HUB_PARTITIONS):
+def _fake_project(tmp_path, ini_body, bin_bytes=200_000, partitions=DUAL_OTA):
     project = tmp_path / "proj"
     build = project / ".pio" / "build" / "esp32dev"
     build.mkdir(parents=True)
@@ -168,7 +168,7 @@ def test_manifest_hashes_every_image_it_finds(tmp_path):
 def test_partitions_setting_is_inherited_from_the_base_env_section(tmp_path):
     from scripts.size_report import build_manifest
 
-    # hub and hp-mesh both set board_build.partitions on [env], not per env.
+    # Projects commonly set board_build.partitions on [env], not per env.
     project, build = _fake_project(
         tmp_path, "[env]\nboard_build.partitions = partitions.csv\n\n[env:esp32dev]\nboard = esp32dev\n")
     m = build_manifest(str(build), "esp32dev", str(project))

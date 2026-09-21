@@ -32,9 +32,9 @@ bare `pio run` (`default_envs` when set, every env otherwise); `all` forces
 everything. `fail-fast: false`, so one board's failure doesn't hide the rest.
 
 Prefer `default` unless you know the project has no host-side environments.
-lp-p2p keeps `[env:native]` out of `default_envs` precisely because a bare
-`pio run` walks into it and fails on `<Arduino.h>`; `all` would reintroduce
-that.
+A project with an `[env:native]` deliberately keeps it out of `default_envs`,
+because a bare `pio run` walks into it and fails on `<Arduino.h>`; `all` would
+reintroduce that.
 
 **Artifacts are artifacts.** The per-repo versions passed `.bin` files from the
 build job to the release job through `actions/cache` keyed on `github.run_id`.
@@ -129,6 +129,5 @@ Consumers pin `@v1`. Releases are `v1.x.y` with `v1` moved to the newest.
 3. `static-analysis` — `pio check` → SARIF → inline PR annotations
 4. `pio-update` — dependency bumps for registry libs, git-tagged libs and
    pioarduino platform URLs, which Dependabot and Renovate don't cover
-5. Testing — `pio test -e native`, then on-target. Not greenfield: lp-p2p
-   already has `[env:native]` and real suites under `test/`, so the reusable
-   workflow should generalize that rather than invent a convention.
+5. Testing — `pio test -e native`, then on-target. `examples/blink` already
+   shows the shape; the reusable workflow should generalize it.

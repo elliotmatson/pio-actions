@@ -1,5 +1,5 @@
-# Drop this in Command-Commissioning/hub as .github/workflows/build-release.yml.
-# It replaces ~150 lines of inlined setup, renaming and cache juggling.
+# A complete caller. Drop this in a firmware repo as
+# .github/workflows/build-release.yml.
 name: build-release
 
 on:
@@ -25,8 +25,11 @@ jobs:
     with:
       release-type: ${{ inputs.release-type || 'build' }}
       release-version: ${{ inputs.release-version || '' }}
-      # hub builds both default_envs (hub, hub-debug); each gets its own job.
+      # Every env in default_envs gets its own job.
       envs: default
-      post-build-run: python3 scripts/verify_fw_descriptor.py
+      # Optional: anything the project needs to run against a fresh build,
+      # such as verifying an embedded firmware descriptor.
+      # post-build-run: python3 scripts/verify_descriptor.py
     secrets:
+      # Only needed when lib_deps points at private repositories.
       gh-token: ${{ secrets.GH_PAT }}
