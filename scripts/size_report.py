@@ -153,8 +153,36 @@ def resolve_partition_table(spec: str, project_dir: str) -> str | None:
     return None
 
 
+def _lookup_option(parser, section: str, option: str) -> str | None:
+    """Resolve an option through a section's `extends` chain.
+
+    PlatformIO lets a project hoist shared settings into an arbitrary section
+    and pull them in with `extends`, which is the usual way to keep board
+    settings away from a host test environment. Reading only [env:name] and
+    [env] misses those, so a project laid out that way would report no
+    partition table at all.
+    """
+    seen: set[str] = set()
+
+    def walk(name: str) -> str | None:
+        if name in seen or not parser.has_section(name):
+            return None
+        seen.add(name)
+        if parser.has_option(name, option):
+            return parser.get(name, option).strip()
+        if parser.has_option(name, "extends"):
+            raw = parser.get(name, "extends")
+            for parent in [p.strip() for p in raw.replace(",", "\n").split("\n") if p.strip()]:
+                found = walk(parent)
+                if found is not None:
+                    return found
+        return None
+
+    return walk(section)
+
+
 def partitions_spec_for_env(project_dir: str, env: str) -> str:
-    """Read board_build.partitions for an env, falling back to the [env] base."""
+    """Read board_build.partitions for an env, through `extends` and [env]."""
     import configparser
 
     parser = configparser.RawConfigParser(strict=False)
@@ -164,10 +192,12 @@ def partitions_spec_for_env(project_dir: str, env: str) -> str:
     with open(ini, encoding="utf-8") as fh:
         parser.read_string(fh.read())
 
-    for section in (f"env:{env}", "env"):
-        if parser.has_option(section, "board_build.partitions"):
-            return parser.get(section, "board_build.partitions").strip()
-    return ""
+    option = "board_build.partitions"
+    # An env's own value wins, then anything it extends, then the [env] base.
+    found = _lookup_option(parser, f"env:{env}", option)
+    if found is None and parser.has_option("env", option):
+        found = parser.get("env", option).strip()
+    return found or ""
 
 
 def sha256(path: str) -> str:

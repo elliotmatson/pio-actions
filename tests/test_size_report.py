@@ -207,3 +207,74 @@ def test_cli_creates_the_manifest_directory_it_was_pointed_at(tmp_path):
     )
 
     assert json.loads(out.read_text())["env"] == "esp32dev"
+
+
+# --- extends chains ----------------------------------------------------------
+
+EXTENDS_INI = """
+[arduino_base]
+framework = arduino
+board_build.partitions = partitions.csv
+
+[env:esp32dev]
+extends = arduino_base
+board = esp32dev
+
+[env:native]
+platform = native
+"""
+
+
+def test_partitions_resolve_through_an_extends_chain(tmp_path):
+    from scripts.size_report import partitions_spec_for_env
+
+    (tmp_path / "platformio.ini").write_text(EXTENDS_INI)
+    assert partitions_spec_for_env(str(tmp_path), "esp32dev") == "partitions.csv"
+
+
+def test_an_env_outside_the_chain_inherits_nothing_from_it(tmp_path):
+    from scripts.size_report import partitions_spec_for_env
+
+    # native does not extend arduino_base, so it must not pick up its table.
+    (tmp_path / "platformio.ini").write_text(EXTENDS_INI)
+    assert partitions_spec_for_env(str(tmp_path), "native") == ""
+
+
+def test_an_envs_own_setting_beats_the_section_it_extends(tmp_path):
+    from scripts.size_report import partitions_spec_for_env
+
+    (tmp_path / "platformio.ini").write_text(
+        EXTENDS_INI + "\nboard_build.partitions = huge_app.csv\n")
+    assert partitions_spec_for_env(str(tmp_path), "native") == "huge_app.csv"
+
+
+def test_a_multi_level_chain_is_followed_to_the_end(tmp_path):
+    from scripts.size_report import partitions_spec_for_env
+
+    (tmp_path / "platformio.ini").write_text("""
+[root]
+board_build.partitions = deep.csv
+
+[middle]
+extends = root
+
+[env:leaf]
+extends = middle
+""")
+    assert partitions_spec_for_env(str(tmp_path), "leaf") == "deep.csv"
+
+
+def test_a_circular_extends_terminates_instead_of_recursing_forever(tmp_path):
+    from scripts.size_report import partitions_spec_for_env
+
+    (tmp_path / "platformio.ini").write_text("""
+[a]
+extends = b
+
+[b]
+extends = a
+
+[env:loop]
+extends = a
+""")
+    assert partitions_spec_for_env(str(tmp_path), "loop") == ""
