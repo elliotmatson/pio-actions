@@ -217,3 +217,84 @@ def test_a_real_document_still_reports_normally(tmp_path):
     )
     assert done.returncode == 0
     assert "1 defect" in out.read_text()
+
+
+
+# --- defects in downloaded dependencies --------------------------------------
+
+def dep_defect(**kw):
+    kw.setdefault("file", "../../.pio/libdeps/hub/ArduinoJson/src/x.hpp")
+    return defect(**kw)
+
+
+def test_a_library_header_is_recognised_as_a_dependency():
+    from scripts.check_report import is_dependency
+
+    assert is_dependency(".pio/libdeps/hub/ArduinoJson/src/x.hpp")
+    assert is_dependency("examples/blink/.pio/libdeps/e/lib/y.h")
+
+
+def test_project_sources_are_not_dependencies():
+    from scripts.check_report import is_dependency
+
+    assert not is_dependency("src/main.cpp")
+    assert not is_dependency("lib/hub/hub.cpp")
+    # A project directory that merely starts with the same letters.
+    assert not is_dependency(".piohelper/thing.c")
+
+
+def test_dependency_defects_are_split_out():
+    from scripts.check_report import partition_dependencies
+
+    own, deps = partition_dependencies([
+        {"file": "src/main.cpp"},
+        {"file": ".pio/libdeps/hub/ArduinoJson/src/x.hpp"},
+    ])
+    assert [d["file"] for d in own] == ["src/main.cpp"]
+    assert [d["file"] for d in deps] == [".pio/libdeps/hub/ArduinoJson/src/x.hpp"]
+
+
+def test_a_high_severity_dependency_defect_does_not_gate_the_merge(tmp_path):
+    # The ArduinoJson case: cppcheck cannot parse the header and calls its own
+    # parse failure a high-severity defect, in a file the repo does not own.
+    import json
+    import subprocess
+    import sys
+
+    raw = tmp_path / "raw.txt"
+    raw.write_text(json.dumps([result(defects=[
+        {"severity": "high", "category": "error", "id": "preprocessorErrorDirective",
+         "message": "failed to expand 'ARDUINOJSON_BEGIN_PUBLIC_NAMESPACE'",
+         "file": f"{ROOT}/.pio/libdeps/hub/ArduinoJson/src/x.hpp",
+         "line": 7, "column": 0, "callstack": None, "cwe": None},
+    ])]))
+    out = tmp_path / "comment.md"
+    done = subprocess.run(
+        [sys.executable, "scripts/check_report.py", "--input", str(raw),
+         "--project-dir", ROOT, "--comment", str(out), "--fail-on", "high"],
+        capture_output=True, text=True,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    body = out.read_text()
+    assert "No defects found." in body
+    # Withheld, not hidden.
+    assert "1 defect in downloaded dependencies withheld" in body
+
+
+def test_include_dependencies_puts_them_back(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    raw = tmp_path / "raw.txt"
+    raw.write_text(json.dumps([result(defects=[
+        {"severity": "high", "category": "error", "id": "preprocessorErrorDirective",
+         "message": "boom", "file": f"{ROOT}/.pio/libdeps/hub/ArduinoJson/src/x.hpp",
+         "line": 7, "column": 0, "callstack": None, "cwe": None},
+    ])]))
+    done = subprocess.run(
+        [sys.executable, "scripts/check_report.py", "--input", str(raw),
+         "--project-dir", ROOT, "--fail-on", "high", "--include-dependencies"],
+        capture_output=True, text=True,
+    )
+    assert done.returncode == 1
