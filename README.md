@@ -60,6 +60,8 @@ like `huge_app.csv`. This is what the memory-diff workflow will diff.
 | `actions/list-envs` | Environment discovery for the build matrix |
 | `actions/firmware-size` | Size manifest for one built environment |
 | `scripts/` | The Python behind the actions, unit-tested in `tests/` |
+| `examples/blink` | Fixture firmware the workflows are tested against |
+| `.github/workflows/tests.yml` | Everything above, run on every push and PR |
 
 ### The PlatformIO pin
 
@@ -86,13 +88,42 @@ Two numbers, because they answer different questions:
 For a dual-OTA table the ceiling is the **smaller** app slot, not the sum — an
 update has to fit whichever slot it lands in.
 
+## Testing this repo
+
+`tests.yml` runs the lot:
+
+| Job | Covers |
+| --- | --- |
+| `scripts` | pytest over `scripts/` |
+| `lint` | actionlint over every workflow |
+| `native` | `pio test -e native` in `examples/blink` |
+| `firmware` | a real two-env build driven through `build-release.yml` |
+| `verify` | asserts the size manifests describe a plausible build |
+
+`examples/blink` is shaped like the repos this serves rather than minimized: two
+board envs so the matrix fans out, a host env for unit tests, a dual-OTA
+partition table, and blink timing extracted into `lib/blink` so the same code
+compiles for the firmware and for the host test runner. The rollover test is the
+reason that split earns its keep — a naive `now > last + interval` stalls for
+49.7 days after `millis()` wraps.
+
+`verify` checks real numbers, not just exit codes: it asserts the app partition
+resolves to `examples/blink/partitions.csv`'s 0x1E0000 slot, so a regression in
+partition parsing fails the build instead of quietly reporting `n/a`.
+
+### Testing the actions themselves
+
+`build-release.yml` takes an `actions-ref`, defaulting to `v1`. The repo's own
+run passes `${{ github.sha }}`, so a pull request exercises the actions it
+changes rather than the last release. Consumers leave it alone.
+
 ## Versioning
 
 Consumers pin `@v1`. Releases are `v1.x.y` with `v1` moved to the newest.
 
 ## Roadmap
 
-1. ~~`setup-pio` + `build-release`~~
+1. ~~`setup-pio` + `build-release`, with `examples/blink` as a test fixture~~
 2. `memory-diff` — flash/RAM delta as a sticky PR comment, against a cached
    merge-base build
 3. `static-analysis` — `pio check` → SARIF → inline PR annotations

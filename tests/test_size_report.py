@@ -123,3 +123,87 @@ def test_markdown_degrades_when_no_partition_table_was_found():
         "ram_bytes": 40_000, "app_partition_bytes": None, "partition_pct": None,
     })
     assert "no partition table found" in line
+
+
+# --- manifest assembly -------------------------------------------------------
+
+def _fake_project(tmp_path, ini_body, bin_bytes=200_000, partitions=HUB_PARTITIONS):
+    project = tmp_path / "proj"
+    build = project / ".pio" / "build" / "esp32dev"
+    build.mkdir(parents=True)
+    (build / "firmware.bin").write_bytes(b"\x00" * bin_bytes)
+    (build / "bootloader.bin").write_bytes(b"\x01" * 1024)
+    (project / "platformio.ini").write_text(ini_body)
+    if partitions:
+        (project / "partitions.csv").write_text(partitions)
+    return project, build
+
+
+def test_manifest_measures_image_and_partition_without_an_elf(tmp_path):
+    from scripts.size_report import build_manifest
+
+    project, build = _fake_project(
+        tmp_path, "[env:esp32dev]\nboard_build.partitions = partitions.csv\n")
+    m = build_manifest(str(build), "esp32dev", str(project))
+
+    assert m["bin_bytes"] == 200_000
+    assert m["app_partition_bytes"] == 0x1F0000
+    assert m["partition_pct"] == round(100 * 200_000 / 0x1F0000, 2)
+    # No ELF present: the section breakdown degrades instead of failing.
+    assert m["flash_bytes"] is None and m["sections"] == {}
+
+
+def test_manifest_hashes_every_image_it_finds(tmp_path):
+    from scripts.size_report import build_manifest
+
+    project, build = _fake_project(
+        tmp_path, "[env:esp32dev]\nboard_build.partitions = partitions.csv\n")
+    m = build_manifest(str(build), "esp32dev", str(project))
+
+    assert set(m["artifacts"]) == {"firmware.bin", "bootloader.bin"}
+    assert all(len(a["sha256"]) == 64 for a in m["artifacts"].values())
+    assert m["artifacts"]["bootloader.bin"]["bytes"] == 1024
+
+
+def test_partitions_setting_is_inherited_from_the_base_env_section(tmp_path):
+    from scripts.size_report import build_manifest
+
+    # hub and hp-mesh both set board_build.partitions on [env], not per env.
+    project, build = _fake_project(
+        tmp_path, "[env]\nboard_build.partitions = partitions.csv\n\n[env:esp32dev]\nboard = esp32dev\n")
+    m = build_manifest(str(build), "esp32dev", str(project))
+
+    assert m["app_partition_bytes"] == 0x1F0000
+
+
+def test_missing_partition_table_leaves_the_percentage_unknown(tmp_path):
+    from scripts.size_report import build_manifest
+
+    project, build = _fake_project(
+        tmp_path, "[env:esp32dev]\nboard = esp32dev\n", partitions=None)
+    m = build_manifest(str(build), "esp32dev", str(project))
+
+    assert m["bin_bytes"] == 200_000
+    assert m["app_partition_bytes"] is None
+    assert m["partition_pct"] is None
+
+
+def test_cli_creates_the_manifest_directory_it_was_pointed_at(tmp_path):
+    # The size step runs before the staging step makes dist/, so the script has
+    # to create it rather than assume it.
+    import json
+    import subprocess
+    import sys
+
+    project, build = _fake_project(
+        tmp_path, "[env:esp32dev]\nboard_build.partitions = partitions.csv\n")
+    out = project / "dist" / "esp32dev-manifest.json"
+
+    subprocess.run(
+        [sys.executable, "scripts/size_report.py",
+         "--build-dir", str(build), "--env", "esp32dev",
+         "--project-dir", str(project), "--output", str(out)],
+        check=True, capture_output=True,
+    )
+
+    assert json.loads(out.read_text())["env"] == "esp32dev"

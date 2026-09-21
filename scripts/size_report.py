@@ -253,6 +253,9 @@ def main() -> int:
     text = json.dumps(manifest, indent=2, sort_keys=True)
 
     if args.output:
+        parent = os.path.dirname(args.output)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(args.output, "w", encoding="utf-8") as fh:
             fh.write(text + "\n")
     else:

@@ -1,0 +1,135 @@
+# Everything that guards this repo, in one run: the Python behind the actions,
+# the workflow syntax, the host-side unit tests, and a real firmware build of
+# examples/blink driven through the reusable workflow itself.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    name: python unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest pyelftools
+      - run: python -m pytest tests -q
+
+  lint:
+    name: workflow syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # These workflows are the product: a syntax error here breaks every
+      # consuming repo at once, not just this one.
+      - uses: raven-actions/actionlint@v2
+        with:
+          files: ".github/workflows/*.yml"
+
+  native:
+    name: firmware unit tests (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./actions/setup-pio
+        with:
+          project-dir: examples/blink
+      # test_build_src defaults to no, so this compiles lib/blink and the test
+      # only -- src/main.cpp and its Arduino.h stay out of the host build.
+      - run: pio test -e native
+        working-directory: examples/blink
+
+  firmware:
+    name: build examples/blink
+    uses: ./.github/workflows/build-release.yml
+    permissions:
+      contents: read
+    with:
+      project-dir: examples/blink
+      release-type: build
+      envs: default
+      # Test the actions from this commit rather than from the last tag, so a
+      # pull request validates its own changes.
+      actions-ref: ${{ github.sha }}
+      retention-days: 7
+
+  verify:
+    name: verify size manifests
+    needs: firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          merge-multiple: true
+          path: dist
+
+      - run: ls -l dist
+
+      - name: Assert the manifests describe a real build
+        env:
+          EXPECTED_ENVS: esp32dev esp32s3
+          # examples/blink/partitions.csv: app0 and app1 are both 0x1E0000.
+          EXPECTED_APP_PARTITION: "1966080"
+        run: |
+          python3 - <<'PY'
+          import glob, json, os, re, sys
+
+          expected = os.environ["EXPECTED_ENVS"].split()
+          ceiling = int(os.environ["EXPECTED_APP_PARTITION"])
+          failures = []
+
+          def check(cond, msg):
+              if not cond:
+                  failures.append(msg)
+
+          found = sorted(glob.glob("dist/*-manifest.json"))
+          check(len(found) == len(expected),
+                f"expected {len(expected)} manifests, found {found}")
+
+          for env in expected:
+              path = f"dist/{env}-manifest.json"
+              if not os.path.isfile(path):
+                  failures.append(f"{path} missing")
+                  continue
+              m = json.load(open(path))
+              print(json.dumps(m, indent=2, sort_keys=True)[:600])
+
+              # An Arduino blink is a few hundred KB; anything tiny means the
+              # image was not actually produced.
+              check(m["bin_bytes"] and m["bin_bytes"] > 100_000,
+                    f"{env}: implausible image size {m['bin_bytes']}")
+              check(m["flash_bytes"] and m["flash_bytes"] > 0, f"{env}: no flash total")
+              check(m["ram_bytes"] and m["ram_bytes"] > 0, f"{env}: no RAM total")
+              check(".text" in m["sections"], f"{env}: no .text section in breakdown")
+
+              # The whole partition chain: read board_build.partitions, resolve
+              # the CSV, pick the smaller OTA slot.
+              check(m["app_partition_bytes"] == ceiling,
+                    f"{env}: app partition {m['app_partition_bytes']} != {ceiling}")
+              check(m["partition_pct"] and 0 < m["partition_pct"] < 100,
+                    f"{env}: partition_pct {m['partition_pct']} out of range")
+
+              check(any(re.fullmatch(rf"{env}-.+\.bin", n) for n in m["artifacts"]),
+                    f"{env}: no firmware image in {list(m['artifacts'])}")
+              for name, meta in m["artifacts"].items():
+                  check(re.fullmatch(r"[0-9a-f]{64}", meta["sha256"]),
+                        f"{env}: bad sha256 for {name}")
+
+              print(f"{env}: {m['bin_bytes']} B, {m['partition_pct']}% of app partition")
+
+          if failures:
+              print("\n".join(f"::error::{f}" for f in failures))
+              sys.exit(1)
+          print("all manifests verified")
+          PY

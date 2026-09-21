@@ -55,6 +55,13 @@ on:
       cache-packages:
         type: boolean
         default: true
+      actions-ref:
+        description: >-
+          Which pio-actions ref supplies the composite actions. Consumers leave
+          this alone. The repo's own e2e run sets it to the commit under test,
+          so a pull request validates its own actions instead of the last tag.
+        type: string
+        default: v1
     secrets:
       gh-token:
         description: Token for private lib_deps. Omit if all deps are public.
@@ -103,8 +110,15 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Building version $version"
 
+      - name: Check out pio-actions
+        uses: actions/checkout@v4
+        with:
+          repository: elliotmatson/pio-actions
+          ref: ${{ inputs.actions-ref }}
+          path: .pio-actions
+
       - id: envs
-        uses: elliotmatson/pio-actions/actions/list-envs@v1
+        uses: ./.pio-actions/actions/list-envs
         with:
           project-dir: ${{ inputs.project-dir }}
           select: ${{ inputs.envs }}
@@ -124,7 +138,14 @@ jobs:
         with:
           fetch-depth: ${{ inputs.fetch-depth }}
 
-      - uses: elliotmatson/pio-actions/actions/setup-pio@v1
+      - name: Check out pio-actions
+        uses: actions/checkout@v4
+        with:
+          repository: elliotmatson/pio-actions
+          ref: ${{ inputs.actions-ref }}
+          path: .pio-actions
+
+      - uses: ./.pio-actions/actions/setup-pio
         with:
           pio-version: ${{ inputs.pio-version }}
           python-version: ${{ inputs.python-version }}
@@ -157,11 +178,11 @@ jobs:
 
       - name: Measure size
         id: size
-        uses: elliotmatson/pio-actions/actions/firmware-size@v1
+        uses: ./.pio-actions/actions/firmware-size
         with:
           env: ${{ matrix.env }}
           project-dir: ${{ inputs.project-dir }}
-          output: dist/${{ matrix.env }}-manifest.json
+          output: ${{ inputs.project-dir }}/dist/${{ matrix.env }}-manifest.json
 
       - name: Stage artifacts
         working-directory: ${{ inputs.project-dir }}
