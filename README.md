@@ -24,6 +24,10 @@ jobs:
 
 See [`examples/`](examples/) for a complete caller.
 
+Grant `contents: write` on the calling job if it will ever produce a release;
+the release job inherits that rather than requesting it, so a build-only caller
+can stay on `contents: read`.
+
 ## What it does differently
 
 **One job per environment.** Environments come from `platformio.ini`, so adding

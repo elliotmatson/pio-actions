@@ -104,7 +104,7 @@ jobs:
           if [ "$RELEASE_TYPE" = "stable" ] || [ "$RELEASE_TYPE" = "beta" ]; then
             version="$RELEASE_VERSION"
           else
-            ref=$(echo "$GITHUB_REF_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
+            ref="${GITHUB_REF_NAME//[^a-zA-Z0-9]/_}"
             version="${ref}-$(git rev-parse --short HEAD)"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -217,8 +217,11 @@ jobs:
       - build
     if: inputs.release-type == 'stable' || inputs.release-type == 'beta'
     runs-on: ${{ inputs.runs-on }}
-    permissions:
-      contents: write
+    # Deliberately no permissions block. A reusable workflow's requests are
+    # validated statically, even for a job an `if` will skip, so requesting
+    # contents: write here would force every caller -- including one that only
+    # ever builds pull requests -- to grant it. Callers that release grant
+    # contents: write themselves and this inherits it.
     steps:
       - uses: actions/download-artifact@v4
         with:
