@@ -51,6 +51,13 @@ on:
           repositories, where this will fail.
         type: boolean
         default: false
+      verbose:
+        description: >-
+          Run `pio check` verbosely. PlatformIO suppresses the reason a tool
+          failed whenever --json-output is set, so this is the only way to see
+          it. Turned on automatically when a tool fails, so you rarely need it.
+        type: boolean
+        default: false
       check-flags:
         description: Extra arguments passed through to `pio check`.
         type: string
@@ -104,6 +111,7 @@ jobs:
         env:
           ENVS_JSON: ${{ steps.envs.outputs.envs }}
           CHECK_FLAGS: ${{ inputs.check-flags }}
+          VERBOSE: ${{ inputs.verbose }}
         run: |
           set -uo pipefail
           mapfile -t names < <(printf '%s' "$ENVS_JSON" \
@@ -111,6 +119,7 @@ jobs:
           args=()
           for name in "${names[@]}"; do args+=(-e "$name"); done
           read -ra extra <<< "$CHECK_FLAGS"
+          if [ "$VERBOSE" = "true" ]; then extra+=(--verbose); fi
           # Never fail here: a defect above the threshold is reported by the
           # next step, after the annotations and the comment have been written.
           pio check --json-output "${args[@]}" "${extra[@]}" \
@@ -143,6 +152,24 @@ jobs:
             --max-annotations "$MAX_ANNOTATIONS" \
             --comment check-comment.md \
             "${sarif_args[@]}"
+
+      # pio reports that a tool failed but not why, because it suppresses the
+      # explanation whenever --json-output is set. Re-running verbosely costs a
+      # few seconds and only happens when something actually went wrong.
+      - name: Explain the tool failure
+        if: steps.report.outputs.tool_failures != '0' && steps.report.outputs.tool_failures != ''
+        working-directory: ${{ inputs.project-dir }}
+        env:
+          ENVS_JSON: ${{ steps.envs.outputs.envs }}
+        run: |
+          set -uo pipefail
+          mapfile -t names < <(printf '%s' "$ENVS_JSON" \
+            | python3 -c 'import json,sys; [print(e) for e in json.load(sys.stdin)]')
+          args=()
+          for name in "${names[@]}"; do args+=(-e "$name"); done
+          echo "::group::pio check --verbose"
+          pio check "${args[@]}" --verbose 2>&1 | tail -120 || true
+          echo "::endgroup::"
 
       - name: Upload SARIF
         if: inputs.upload-sarif && hashFiles('check.sarif') != ''

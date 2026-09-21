@@ -258,6 +258,7 @@ def main() -> int:
             for level, n in tally.items():
                 fh.write(f"{level}={n}\n")
             fh.write(f"total={sum(tally.values())}\n")
+            fh.write(f"tool_failures={len(broken)}\n")
 
     blocking = over_threshold(defects, args.fail_on)
     if broken:
