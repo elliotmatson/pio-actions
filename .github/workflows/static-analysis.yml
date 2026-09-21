@@ -219,6 +219,16 @@ jobs:
 
       - name: Fail on defects at or above the threshold
         if: steps.report.outcome == 'failure'
+        env:
+          # Empty when the script exited before writing its outputs, which
+          # means it never produced a report at all.
+          TOTAL: ${{ steps.report.outputs.total }}
+          FAIL_ON: ${{ inputs.fail-on }}
         run: |
-          echo "::error::static analysis reported defects at or above '${{ inputs.fail-on }}'"
+          if [ -z "$TOTAL" ]; then
+            echo "::error::static analysis could not produce a report; see the \
+          pio check output above"
+          else
+            echo "::error::static analysis reported defects at or above '$FAIL_ON'"
+          fi
           exit 1

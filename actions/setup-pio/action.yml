@@ -81,4 +81,11 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
-      run: gh auth setup-git
+      run: |
+        gh auth setup-git
+        # The helper gh installs shells back out to `gh auth git-credential`,
+        # which reads GH_TOKEN from the environment at the moment git asks for
+        # credentials -- during `pio run`, long after this step has ended.
+        # Without persisting it, a private lib_deps fails to clone with
+        # "could not read Username for 'https://github.com'".
+        echo "GH_TOKEN=$GH_TOKEN" >> "$GITHUB_ENV"

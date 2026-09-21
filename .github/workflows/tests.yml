@@ -61,6 +61,27 @@ jobs:
       - run: pio test -e native
         working-directory: examples/blink
 
+  token-persistence:
+    name: setup-pio exports its token
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./actions/setup-pio
+        with:
+          project-dir: examples/blink
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+          cache-packages: "false"
+      # The fixture has only public dependencies, so a broken token would go
+      # unnoticed here until some other repo's private lib_deps failed to
+      # clone. Assert the export directly instead.
+      - name: The token must still be set in a later step
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::setup-pio did not export GH_TOKEN; private lib_deps will fail to clone"
+            exit 1
+          fi
+          echo "GH_TOKEN is set for subsequent steps"
+
   firmware:
     name: build examples/blink
     uses: ./.github/workflows/build-release.yml
