@@ -51,6 +51,15 @@ on:
           repositories, where this will fail.
         type: boolean
         default: false
+      include-dependencies:
+        description: >-
+          Also report defects inside .pio, where downloaded libraries live. Off
+          by default: those files are not in the repository, so an annotation
+          cannot render on the diff, and cppcheck reports its own parse failures
+          on macro-heavy headers as high severity -- enough to fail a merge over
+          a dependency's code. The comment always says how many were withheld.
+        type: boolean
+        default: false
       skip-packages:
         description: >-
           Exclude installed packages from analysis. On by default, and it needs
@@ -152,10 +161,12 @@ jobs:
           FAIL_ON: ${{ inputs.fail-on }}
           MAX_ANNOTATIONS: ${{ inputs.max-annotations }}
           WANT_SARIF: ${{ inputs.upload-sarif }}
+          INCLUDE_DEPS: ${{ inputs.include-dependencies }}
         run: |
           set -uo pipefail
           sarif_args=()
           if [ "$WANT_SARIF" = "true" ]; then sarif_args=(--sarif check.sarif); fi
+          if [ "$INCLUDE_DEPS" = "true" ]; then sarif_args+=(--include-dependencies); fi
           python3 .pio-actions/scripts/check_report.py \
             --input "$PROJECT_DIR/check-raw.txt" \
             --project-dir "$PROJECT_DIR" \

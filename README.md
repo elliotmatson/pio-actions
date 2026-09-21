@@ -151,6 +151,14 @@ report is not zero defects; it means nothing was analysed.
 Annotations are capped (50 by default) so a noisy first run cannot bury the
 diff; the rest stay in the summary and the comment.
 
+Defects inside `.pio` are withheld by default. Those files are downloaded
+libraries, not the project's: an annotation on one cannot render on the diff,
+and nobody can act on it. It is not merely noise — cppcheck reports its own
+failure to parse macro-heavy headers as a **high-severity**
+`preprocessorErrorDirective`, and one of those in ArduinoJson is enough to fail
+a merge over a dependency's code. The comment always states how many were
+withheld, and `include-dependencies: true` puts them back.
+
 ### What this replaces
 
 The per-repo `static-analysis.yml` pairs `pio check` with super-linter. On

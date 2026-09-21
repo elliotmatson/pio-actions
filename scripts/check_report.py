@@ -53,6 +53,25 @@ def load_results(text: str) -> list[dict]:
     raise SystemExit("no JSON document found in the `pio check` output")
 
 
+def is_dependency(path: str) -> bool:
+    """True for a file PlatformIO downloaded rather than one the repo owns.
+
+    Libraries land in .pio/libdeps. Defects there are not actionable: the file
+    is not in the repository, so an annotation cannot even render on the diff.
+    Worse, cppcheck's parser trips over macro-heavy headers and reports that as
+    a high-severity preprocessorErrorDirective -- one of those in ArduinoJson
+    is enough to fail a merge over somebody else's code.
+    """
+    return path.startswith(".pio/") or "/.pio/" in path
+
+
+def partition_dependencies(defects: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split defects into the project's own and its dependencies'."""
+    own = [d for d in defects if not is_dependency(d["file"])]
+    deps = [d for d in defects if is_dependency(d["file"])]
+    return own, deps
+
+
 def relativize(path: str, root: str) -> str:
     """Make a defect path repo-relative so annotations land on the right line."""
     if not path or path == "unknown":
@@ -148,7 +167,8 @@ def over_threshold(defects: list[dict], fail_on: str) -> list[dict]:
 
 
 def render_markdown(defects: list[dict], tally: dict[str, int], fail_on: str,
-                    broken: list[str], rows: int = 30) -> str:
+                    broken: list[str], rows: int = 30,
+                    skipped_dependencies: int = 0) -> str:
     lines = [MARKER, "### Static analysis", ""]
 
     if broken:
@@ -162,7 +182,8 @@ def render_markdown(defects: list[dict], tally: dict[str, int], fail_on: str,
     if not total:
         lines.append("No defects found.")
         lines.append("")
-        lines.append(f"<sub>`pio check`, failing on `{fail_on}` and above.</sub>")
+        lines.append(f"<sub>`pio check`, failing on `{fail_on}` and above."
+                     f"{_withheld(skipped_dependencies)}</sub>")
         return "\n".join(lines)
 
     lines.append(f"**{total} defect{'s' if total != 1 else ''}** — "
@@ -179,8 +200,16 @@ def render_markdown(defects: list[dict], tally: dict[str, int], fail_on: str,
         lines.append(f"| | | _+{len(defects) - rows} more_ |")
     lines.append("")
     lines.append(f"<sub>`pio check`, failing on `{fail_on}` and above. "
-                 f"Defects seen in several environments are listed once.</sub>")
+                 f"Defects seen in several environments are listed once."
+                 f"{_withheld(skipped_dependencies)}</sub>")
     return "\n".join(lines)
+
+
+def _withheld(n: int) -> str:
+    if not n:
+        return ""
+    return (f" {n} defect{'s' if n != 1 else ''} in downloaded dependencies "
+            f"withheld; pass include-dependencies to see them.")
 
 
 def to_sarif(defects: list[dict]) -> dict:
@@ -224,6 +253,8 @@ def main() -> int:
     ap.add_argument("--input", required=True, help="raw `pio check --json-output` output")
     ap.add_argument("--project-dir", default=".")
     ap.add_argument("--fail-on", default="high", choices=["high", "medium", "low", "none"])
+    ap.add_argument("--include-dependencies", action="store_true",
+                    help="also report defects inside .pio, which the project does not own")
     ap.add_argument("--max-annotations", type=int, default=50)
     ap.add_argument("--comment", default="", help="write the comment body here")
     ap.add_argument("--sarif", default="", help="write SARIF here")
@@ -239,6 +270,10 @@ def main() -> int:
 
     root = os.path.abspath(args.project_dir)
     defects = collect_defects(results, root)
+    withheld = 0
+    if not args.include_dependencies:
+        defects, dependency_defects = partition_dependencies(defects)
+        withheld = len(dependency_defects)
     broken = failed_tools(results)
     tally = counts(defects)
 
@@ -248,7 +283,8 @@ def main() -> int:
         print(f"::notice::{len(defects) - args.max_annotations} further defects are "
               f"listed in the summary but not annotated")
 
-    body = render_markdown(defects, tally, args.fail_on, broken)
+    body = render_markdown(defects, tally, args.fail_on, broken,
+                           skipped_dependencies=withheld)
     if args.comment:
         with open(args.comment, "w", encoding="utf-8") as fh:
             fh.write(body + "\n")
