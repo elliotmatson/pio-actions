@@ -21,6 +21,8 @@
 
 namespace {
 Blink led(120, 880);
+Blink status(500, 500);
+uint32_t last_report = 0;
 }
 
 void setup() {
@@ -30,6 +32,17 @@ void setup() {
 }
 
 void loop() {
-  digitalWrite(LED_PIN, led.update(millis()) ? HIGH : LOW);
+  const uint32_t now = millis();
+  digitalWrite(LED_PIN, led.update(now) ? HIGH : LOW);
+  status.update(now);
+
+  // A once-a-second line, so a serial monitor shows the fixture is alive.
+  if (now - last_report >= 1000) {
+    last_report = now;
+    Serial.printf("up %lus led=%d status=%d transitions=%lu\n",
+                  static_cast<unsigned long>(now / 1000UL), led.state(),
+                  status.state(),
+                  static_cast<unsigned long>(led.transitions()));
+  }
   delay(1);
 }
