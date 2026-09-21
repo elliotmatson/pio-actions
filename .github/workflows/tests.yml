@@ -81,6 +81,10 @@ jobs:
       # pull request validates its own changes.
       actions-ref: ${{ github.sha }}
       retention-days: 7
+      # Exercises the extra-target loop and PIO_ENV. `size` is used rather than
+      # `buildfs` because it works for every env; buildfs is the motivating case
+      # but is project-specific, and a blink fixture has no filesystem.
+      targets: size
 
   analysis:
     name: static analysis

@@ -28,8 +28,15 @@ jobs:
       # Every env in default_envs gets its own job.
       envs: default
       # Optional: anything the project needs to run against a fresh build,
-      # such as verifying an embedded firmware descriptor.
-      # post-build-run: python3 scripts/verify_descriptor.py
+      # such as verifying an embedded firmware descriptor. PIO_ENV names the
+      # environment being built.
+      # post-build-run: python3 scripts/verify_descriptor.py --env "$PIO_ENV"
+      #
+      # Optional: a project whose firmware reads different macro names.
+      # version-flags: -DFW_VERSION='"{version}"' -DREPO_PATH='"{repo}"'
+      #
+      # Optional: extra targets per environment, e.g. a filesystem image.
+      # targets: buildfs
     secrets:
       # Only needed when lib_deps points at private repositories.
       gh-token: ${{ secrets.GH_PAT }}
