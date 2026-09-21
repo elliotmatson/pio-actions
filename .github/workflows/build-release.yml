@@ -296,8 +296,26 @@ jobs:
           ref: ${{ inputs.actions-ref }}
           path: .pio-actions
 
-      - uses: ./.pio-actions/actions/setup-pio
+      - name: Check the environment exists at the baseline
+        id: baseline-env
         if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          ENV_NAME: ${{ matrix.env }}
+          PROJECT_DIR: ${{ inputs.project-dir }}
+        run: |
+          # An environment added by this pull request cannot exist at the
+          # baseline. Building it would fail loudly for an entirely expected
+          # case, so report it as new instead.
+          if python3 .pio-actions/scripts/list_envs.py \
+               --project-dir "$PROJECT_DIR" --select all | grep -q "\"$ENV_NAME\""; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$ENV_NAME does not exist at the baseline; the size diff will report it as new"
+          fi
+
+      - uses: ./.pio-actions/actions/setup-pio
+        if: steps.cache.outputs.cache-hit != 'true' && steps.baseline-env.outputs.present == 'true'
         with:
           pio-version: ${{ inputs.pio-version }}
           python-version: ${{ inputs.python-version }}
@@ -306,7 +324,7 @@ jobs:
           gh-token: ${{ secrets.gh-token }}
 
       - name: Build baseline ${{ matrix.env }}
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.cache.outputs.cache-hit != 'true' && steps.baseline-env.outputs.present == 'true'
         working-directory: ${{ inputs.project-dir }}
         env:
           # Deliberately the *head* version string. A different one would be a
@@ -319,7 +337,7 @@ jobs:
         run: pio run -e "${{ matrix.env }}"
 
       - name: Measure baseline
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.cache.outputs.cache-hit != 'true' && steps.baseline-env.outputs.present == 'true'
         uses: ./.pio-actions/actions/firmware-size
         with:
           env: ${{ matrix.env }}
@@ -330,14 +348,14 @@ jobs:
       # Only after a clean build, so a failed baseline cannot poison the key
       # with an empty directory that later runs would treat as a hit.
       - name: Cache the baseline
-        if: success() && steps.cache.outputs.cache-hit != 'true'
+        if: success() && steps.cache.outputs.cache-hit != 'true' && steps.baseline-env.outputs.present == 'true'
         uses: actions/cache/save@v4
         with:
           path: base-manifests
           key: size-base-s2-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
 
       - uses: actions/upload-artifact@v4
-        if: success()
+        if: success() && (steps.cache.outputs.cache-hit == 'true' || steps.baseline-env.outputs.present == 'true')
         with:
           name: base-manifest-${{ matrix.env }}
           path: base-manifests/${{ matrix.env }}-manifest.json
