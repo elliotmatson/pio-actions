@@ -50,6 +50,15 @@ forever, so bumping a platform silently reused the toolchain cache built for
 the previous one. Keys now hash `platformio.ini`, with `restore-keys` for a
 warm start on a miss.
 
+**Projects differ, and the workflow bends rather than forking.** The version
+macros are a template — `-DFW_VERSION='"{version}"' -DFW_TYPE='"{type}"'
+-DREPO_URL='"{repo}"'` by default — so a project reading `REPO_PATH`, or one
+that derives its version from `git describe` and wants no `FW_VERSION` at all,
+changes one input instead of maintaining its own workflow. `targets` builds
+extra `pio run` targets per environment, such as `buildfs` for a project that
+ships a filesystem image, and `PIO_ENV` is exported to the pre- and post-build
+hooks so they can tell which environment they are running for.
+
 **The merged image ships too.** pioarduino writes a `firmware.factory.bin`
 alongside the app image — bootloader, partition table and application already
 combined at their flash offsets. The per-repo workflows left it in the build

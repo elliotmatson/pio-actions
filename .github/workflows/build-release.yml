@@ -41,6 +41,26 @@ on:
           clone reduces to a bare hash.
         type: number
         default: 0
+      version-flags:
+        description: >-
+          Template for the version macros, with {version}, {type} and {repo}
+          substituted. Defaults to what most of the firmware repos expect; set
+          it to something else when a project reads different names, or to an
+          empty string to inject nothing.
+        type: string
+        default: >-
+          -DFW_VERSION='"{version}"' -DFW_TYPE='"{type}"' -DREPO_URL='"{repo}"'
+      build-flags:
+        description: Extra flags appended to PLATFORMIO_BUILD_FLAGS verbatim.
+        type: string
+        default: ""
+      targets:
+        description: >-
+          Additional `pio run` targets to build per environment, space
+          separated -- `buildfs` for a project that ships a filesystem image.
+          Each runs after the default build.
+        type: string
+        default: ""
       pre-build-run:
         description: Shell to run in project-dir before `pio run`.
         type: string
@@ -187,27 +207,65 @@ jobs:
           cache-packages: ${{ inputs.cache-packages }}
           gh-token: ${{ secrets.gh-token }}
 
+      # Substituted in Python rather than the shell: the default template
+      # carries nested quotes that the shell would have to escape twice.
+      - name: Resolve build flags
+        env:
+          TEMPLATE: ${{ inputs.version-flags }}
+          EXTRA: ${{ inputs.build-flags }}
+          VERSION: ${{ needs.discover.outputs.version }}
+          RELEASE_TYPE: ${{ inputs.release-type }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          flags=$(python3 - <<'PY'
+          import os
+
+          flags = os.environ["TEMPLATE"]
+          for token, value in (
+              ("{version}", os.environ["VERSION"]),
+              ("{type}", os.environ["RELEASE_TYPE"]),
+              ("{repo}", os.environ["REPO"]),
+          ):
+              flags = flags.replace(token, value)
+          print(" ".join(p for p in (flags.strip(), os.environ["EXTRA"].strip()) if p))
+          PY
+          )
+          echo "PLATFORMIO_BUILD_FLAGS=$flags" >> "$GITHUB_ENV"
+          echo "resolved: $flags"
+
       - name: Pre-build
         if: inputs.pre-build-run != ''
         working-directory: ${{ inputs.project-dir }}
         env:
           SCRIPT: ${{ inputs.pre-build-run }}
+          PIO_ENV: ${{ matrix.env }}
         run: bash -c "$SCRIPT"
 
       - name: Build ${{ matrix.env }}
         working-directory: ${{ inputs.project-dir }}
-        env:
-          PLATFORMIO_BUILD_FLAGS: >-
-            -DFW_VERSION='"${{ needs.discover.outputs.version }}"'
-            -DFW_TYPE='"${{ inputs.release-type }}"'
-            -DREPO_URL='"${{ github.repository }}"'
         run: pio run -e "${{ matrix.env }}"
+
+      - name: Build extra targets
+        if: inputs.targets != ''
+        working-directory: ${{ inputs.project-dir }}
+        env:
+          TARGETS: ${{ inputs.targets }}
+          PIO_ENV: ${{ matrix.env }}
+        run: |
+          set -euo pipefail
+          for target in $TARGETS; do
+            echo "::group::pio run -e $PIO_ENV -t $target"
+            pio run -e "$PIO_ENV" -t "$target"
+            echo "::endgroup::"
+          done
 
       - name: Post-build
         if: inputs.post-build-run != ''
         working-directory: ${{ inputs.project-dir }}
         env:
           SCRIPT: ${{ inputs.post-build-run }}
+          PIO_ENV: ${{ matrix.env }}
         run: bash -c "$SCRIPT"
 
       - name: Measure size
@@ -327,14 +385,31 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true' && steps.baseline-env.outputs.present == 'true'
         working-directory: ${{ inputs.project-dir }}
         env:
-          # Deliberately the *head* version string. A different one would be a
-          # different number of bytes of .rodata, and that noise would show up
-          # in the diff as though the change had caused it.
-          PLATFORMIO_BUILD_FLAGS: >-
-            -DFW_VERSION='"${{ needs.discover.outputs.version }}"'
-            -DFW_TYPE='"${{ inputs.release-type }}"'
-            -DREPO_URL='"${{ github.repository }}"'
-        run: pio run -e "${{ matrix.env }}"
+          # Deliberately the *head* version string, and the same flags the head
+          # build used. A different one would be a different number of bytes of
+          # .rodata, and that noise would show up in the diff as though the
+          # change had caused it.
+          TEMPLATE: ${{ inputs.version-flags }}
+          EXTRA: ${{ inputs.build-flags }}
+          VERSION: ${{ needs.discover.outputs.version }}
+          RELEASE_TYPE: ${{ inputs.release-type }}
+          REPO: ${{ github.repository }}
+        run: |
+          PLATFORMIO_BUILD_FLAGS=$(python3 - <<'PY'
+          import os
+
+          flags = os.environ["TEMPLATE"]
+          for token, value in (
+              ("{version}", os.environ["VERSION"]),
+              ("{type}", os.environ["RELEASE_TYPE"]),
+              ("{repo}", os.environ["REPO"]),
+          ):
+              flags = flags.replace(token, value)
+          print(" ".join(p for p in (flags.strip(), os.environ["EXTRA"].strip()) if p))
+          PY
+          )
+          export PLATFORMIO_BUILD_FLAGS
+          pio run -e "${{ matrix.env }}"
 
       - name: Measure baseline
         if: steps.cache.outputs.cache-hit != 'true' && steps.baseline-env.outputs.present == 'true'
