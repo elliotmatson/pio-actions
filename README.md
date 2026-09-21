@@ -58,9 +58,15 @@ changes one input instead of maintaining its own workflow. `targets` builds
 extra `pio run` targets per environment, such as `buildfs` for a project that
 ships a filesystem image. The pre- and post-build hooks get `PIO_ENV`,
 `FW_VERSION` and `RELEASE_TYPE`, so they can act per environment or only for a
-release — a project whose version comes from `git describe` uses that to create
-the tag before the build, since ESP-IDF reads `PROJECT_VER` from it and the
-release job only tags afterwards.
+release.
+
+**A release is tagged before it is built.** ESP-IDF derives `PROJECT_VER` from
+`git describe`, and that version is read back at runtime — it reaches device
+screens and logs. Since the release job only tags afterwards, a `stable` or
+`beta` build creates the tag locally first, so `git describe` reports the
+version rather than a bare commit hash. No project needs to arrange this
+itself. The remote tag is still created by the release job, and only if the
+build succeeded.
 
 **The merged image ships too.** pioarduino writes a `firmware.factory.bin`
 alongside the app image — bootloader, partition table and application already

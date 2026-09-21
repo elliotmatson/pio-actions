@@ -205,6 +205,20 @@ jobs:
           ref: ${{ inputs.actions-ref }}
           path: .pio-actions
 
+      # ESP-IDF derives PROJECT_VER from `git describe`, and that version is
+      # read back at runtime -- it reaches device screens and logs. The release
+      # job only creates the tag after building, so without this a release
+      # would ship firmware showing a bare commit hash. A local lightweight tag
+      # is enough: git describe reads local refs, and the real remote tag is
+      # still created by the release job, only if the build succeeds.
+      - name: Tag the release commit
+        if: inputs.release-type == 'stable' || inputs.release-type == 'beta'
+        env:
+          VERSION: ${{ needs.discover.outputs.version }}
+        run: |
+          git tag -f "$VERSION"
+          git describe --always --tags --dirty
+
       - uses: ./.pio-actions/actions/setup-pio
         with:
           pio-version: ${{ inputs.pio-version }}
