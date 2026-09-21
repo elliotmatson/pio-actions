@@ -1,0 +1,84 @@
+name: Set up PlatformIO
+description: >-
+  Install a pinned PlatformIO with a cache that actually invalidates, and
+  authenticate git for private library dependencies.
+
+inputs:
+  pio-version:
+    description: >-
+      PlatformIO core version. Pinned rather than floating: PlatformIO 6.2.0
+      wants tool-scons ~4.41101.0 and installs it over the SCons 4.8.1 that
+      pioarduino pins, which breaks the build with "No module named
+      'SCons.Tool.FortranCommon'". Bump here once, for every repo.
+    default: "6.1.19"
+  python-version:
+    default: "3.12"
+  gh-token:
+    description: >-
+      Token for `gh auth setup-git`, so lib_deps pointing at private repos
+      resolve. Omit for projects with only public dependencies.
+    default: ""
+  project-dir:
+    default: "."
+  cache:
+    description: Cache pip downloads and the PlatformIO download cache.
+    default: "true"
+  cache-packages:
+    description: >-
+      Also cache extracted platforms and toolchains (~/.platformio/packages).
+      Saves the unpack step as well as the download, at the cost of a cache
+      entry big enough to matter against the 10 GB per-repo limit.
+    default: "true"
+
+outputs:
+  cache-hit:
+    description: Whether the toolchain cache was an exact hit.
+    value: ${{ steps.cache-packages.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # Keyed on platformio.ini, unlike the per-repo copies this replaces: those
+    # used a constant key, so bumping a platform silently reused the toolchain
+    # built for the old one. restore-keys still gives a warm start on a miss.
+    - name: Cache pip and PlatformIO downloads
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/pip
+          ~/.platformio/.cache
+        key: pio-dl-${{ runner.os }}-py${{ inputs.python-version }}-pio${{ inputs.pio-version }}-${{ hashFiles(format('{0}/platformio.ini', inputs.project-dir)) }}
+        restore-keys: |
+          pio-dl-${{ runner.os }}-py${{ inputs.python-version }}-pio${{ inputs.pio-version }}-
+          pio-dl-${{ runner.os }}-
+
+    - name: Cache PlatformIO platforms and toolchains
+      id: cache-packages
+      if: inputs.cache == 'true' && inputs.cache-packages == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.platformio/packages
+          ~/.platformio/platforms
+        key: pio-pkg-${{ runner.os }}-pio${{ inputs.pio-version }}-${{ hashFiles(format('{0}/platformio.ini', inputs.project-dir)) }}
+        restore-keys: |
+          pio-pkg-${{ runner.os }}-pio${{ inputs.pio-version }}-
+
+    - name: Install PlatformIO
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install "platformio==${{ inputs.pio-version }}" pyelftools
+        pio --version
+
+    - name: Authenticate git for private libraries
+      if: inputs.gh-token != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+      run: gh auth setup-git

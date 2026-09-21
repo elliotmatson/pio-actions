@@ -1,0 +1,58 @@
+name: Measure firmware size
+description: >-
+  Emit a size manifest for one built environment: image bytes against the app
+  partition ceiling, plus a flash/RAM section breakdown from the ELF.
+
+inputs:
+  env:
+    description: PlatformIO environment name.
+    required: true
+  project-dir:
+    default: "."
+  build-dir:
+    description: Defaults to <project-dir>/.pio/build/<env>.
+    default: ""
+  output:
+    description: Where to write the manifest JSON.
+    default: ""
+  summary:
+    description: Append a one-line summary to the job summary.
+    default: "true"
+
+outputs:
+  manifest:
+    description: Path to the manifest JSON.
+    value: ${{ steps.measure.outputs.manifest }}
+  bin_bytes:
+    description: Size of firmware.bin -- what has to fit the partition.
+    value: ${{ steps.measure.outputs.bin_bytes }}
+  flash_bytes:
+    value: ${{ steps.measure.outputs.flash_bytes }}
+  ram_bytes:
+    value: ${{ steps.measure.outputs.ram_bytes }}
+  partition_pct:
+    description: Percent of the app partition consumed, or empty if unknown.
+    value: ${{ steps.measure.outputs.partition_pct }}
+
+runs:
+  using: composite
+  steps:
+    - id: measure
+      shell: bash
+      env:
+        BUILD_DIR: ${{ inputs.build-dir }}
+        PROJECT_DIR: ${{ inputs.project-dir }}
+        ENV_NAME: ${{ inputs.env }}
+        OUT: ${{ inputs.output }}
+      run: |
+        set -euo pipefail
+        python3 -c "import elftools" 2>/dev/null || pip install --quiet pyelftools
+        build_dir="${BUILD_DIR:-$PROJECT_DIR/.pio/build/$ENV_NAME}"
+        out="${OUT:-manifest-$ENV_NAME.json}"
+        python3 "${{ github.action_path }}/../../scripts/size_report.py" \
+          --build-dir "$build_dir" \
+          --env "$ENV_NAME" \
+          --project-dir "$PROJECT_DIR" \
+          --output "$out" \
+          ${{ inputs.summary == 'true' && '--summary' || '' }}
+        echo "manifest=$out" >> "$GITHUB_OUTPUT"

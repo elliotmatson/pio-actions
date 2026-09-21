@@ -1,0 +1,222 @@
+# Reusable build + release for PlatformIO / pioarduino firmware.
+#
+# Builds one job per environment instead of a single serial `pio run`, hands
+# binaries between jobs as artifacts rather than smuggling them through the
+# cache, and attaches a size manifest to every build.
+name: build-release
+
+on:
+  workflow_call:
+    inputs:
+      release-type:
+        description: stable, beta, or build.
+        type: string
+        default: build
+      release-version:
+        description: Required for stable and beta. Ignored for build.
+        type: string
+        default: ""
+      envs:
+        description: >-
+          "default" mirrors a bare `pio run`, "all" forces every env, or pass an
+          explicit list.
+        type: string
+        default: default
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      python-version:
+        type: string
+        default: "3.12"
+      pio-version:
+        type: string
+        default: "6.1.19"
+      project-dir:
+        type: string
+        default: "."
+      fetch-depth:
+        description: >-
+          Full history by default: ESP-IDF derives PROJECT_VER, and so
+          esp_app_desc_t.version, from `git describe --tags`, which a shallow
+          clone reduces to a bare hash.
+        type: number
+        default: 0
+      pre-build-run:
+        description: Shell to run in project-dir before `pio run`.
+        type: string
+        default: ""
+      post-build-run:
+        description: Shell to run in project-dir after a successful `pio run`.
+        type: string
+        default: ""
+      retention-days:
+        type: number
+        default: 30
+      cache-packages:
+        type: boolean
+        default: true
+    secrets:
+      gh-token:
+        description: Token for private lib_deps. Omit if all deps are public.
+        required: false
+    outputs:
+      version:
+        description: The version string stamped into the firmware.
+        value: ${{ jobs.discover.outputs.version }}
+      envs:
+        description: JSON array of environments built.
+        value: ${{ jobs.discover.outputs.envs }}
+
+jobs:
+  discover:
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      envs: ${{ steps.envs.outputs.envs }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # A release with no version would publish binaries named after a
+      # placeholder, so refuse before spending a build on it.
+      - name: Validate release inputs
+        if: inputs.release-type == 'stable' || inputs.release-type == 'beta'
+        env:
+          VERSION: ${{ inputs.release-version }}
+        run: |
+          if [ -z "$VERSION" ] || [ "$VERSION" = "vX.X.X" ]; then
+            echo "::error::release-type '${{ inputs.release-type }}' needs a real release-version (got '$VERSION')"
+            exit 1
+          fi
+
+      - name: Resolve version
+        id: version
+        env:
+          RELEASE_TYPE: ${{ inputs.release-type }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+        run: |
+          if [ "$RELEASE_TYPE" = "stable" ] || [ "$RELEASE_TYPE" = "beta" ]; then
+            version="$RELEASE_VERSION"
+          else
+            ref=$(echo "$GITHUB_REF_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
+            version="${ref}-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building version $version"
+
+      - id: envs
+        uses: elliotmatson/pio-actions/actions/list-envs@v1
+        with:
+          project-dir: ${{ inputs.project-dir }}
+          select: ${{ inputs.envs }}
+
+  build:
+    needs: discover
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    strategy:
+      # One board's failure should not hide the others' results.
+      fail-fast: false
+      matrix:
+        env: ${{ fromJSON(needs.discover.outputs.envs) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ inputs.fetch-depth }}
+
+      - uses: elliotmatson/pio-actions/actions/setup-pio@v1
+        with:
+          pio-version: ${{ inputs.pio-version }}
+          python-version: ${{ inputs.python-version }}
+          project-dir: ${{ inputs.project-dir }}
+          cache-packages: ${{ inputs.cache-packages }}
+          gh-token: ${{ secrets.gh-token }}
+
+      - name: Pre-build
+        if: inputs.pre-build-run != ''
+        working-directory: ${{ inputs.project-dir }}
+        env:
+          SCRIPT: ${{ inputs.pre-build-run }}
+        run: bash -c "$SCRIPT"
+
+      - name: Build ${{ matrix.env }}
+        working-directory: ${{ inputs.project-dir }}
+        env:
+          PLATFORMIO_BUILD_FLAGS: >-
+            -DFW_VERSION='"${{ needs.discover.outputs.version }}"'
+            -DFW_TYPE='"${{ inputs.release-type }}"'
+            -DREPO_URL='"${{ github.repository }}"'
+        run: pio run -e "${{ matrix.env }}"
+
+      - name: Post-build
+        if: inputs.post-build-run != ''
+        working-directory: ${{ inputs.project-dir }}
+        env:
+          SCRIPT: ${{ inputs.post-build-run }}
+        run: bash -c "$SCRIPT"
+
+      - name: Measure size
+        id: size
+        uses: elliotmatson/pio-actions/actions/firmware-size@v1
+        with:
+          env: ${{ matrix.env }}
+          project-dir: ${{ inputs.project-dir }}
+          output: dist/${{ matrix.env }}-manifest.json
+
+      - name: Stage artifacts
+        working-directory: ${{ inputs.project-dir }}
+        env:
+          ENV_NAME: ${{ matrix.env }}
+          VERSION: ${{ needs.discover.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          build=".pio/build/$ENV_NAME"
+          for image in firmware bootloader partitions littlefs spiffs; do
+            src="$build/$image.bin"
+            [ -f "$src" ] || continue
+            if [ "$image" = "firmware" ]; then
+              cp -v "$src" "dist/${ENV_NAME}-${VERSION}.bin"
+            else
+              cp -v "$src" "dist/${ENV_NAME}-${VERSION}-${image}.bin"
+            fi
+          done
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.env }}
+          path: ${{ inputs.project-dir }}/dist/*
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+
+  release:
+    needs:
+      - discover
+      - build
+    if: inputs.release-type == 'stable' || inputs.release-type == 'beta'
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum ./*.bin | tee SHA256SUMS
+          ls -l
+
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: "dist/*.bin,dist/SHA256SUMS"
+          generateReleaseNotes: true
+          tag: ${{ needs.discover.outputs.version }}
+          commit: ${{ github.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prerelease: ${{ inputs.release-type == 'beta' }}
+          makeLatest: ${{ inputs.release-type == 'stable' }}

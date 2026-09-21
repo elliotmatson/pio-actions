@@ -1,0 +1,32 @@
+name: List PlatformIO environments
+description: >-
+  Resolve which environments a build should cover by reading platformio.ini.
+  Needs no toolchain, so it can gate a matrix before anything is installed.
+
+inputs:
+  project-dir:
+    description: Directory containing platformio.ini.
+    default: "."
+  select:
+    description: >-
+      "default" mirrors a bare `pio run` (default_envs when set, every env
+      otherwise), "all" forces every env, or pass an explicit list.
+    default: default
+
+outputs:
+  envs:
+    description: JSON array of environment names, ready for fromJSON in a matrix.
+    value: ${{ steps.list.outputs.envs }}
+  count:
+    description: How many environments were selected.
+    value: ${{ steps.list.outputs.count }}
+
+runs:
+  using: composite
+  steps:
+    - id: list
+      shell: bash
+      run: >-
+        python3 "${{ github.action_path }}/../../scripts/list_envs.py"
+        --project-dir "${{ inputs.project-dir }}"
+        --select "${{ inputs.select }}"

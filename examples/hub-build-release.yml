@@ -1,0 +1,32 @@
+# Drop this in Command-Commissioning/hub as .github/workflows/build-release.yml.
+# It replaces ~150 lines of inlined setup, renaming and cache juggling.
+name: build-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-type:
+        type: choice
+        description: Stable Release, Beta Release, or Build?
+        options: [stable, beta, build]
+        default: build
+      release-version:
+        type: string
+        description: Firmware Version (ignored for Build)
+        default: vX.X.X
+        required: true
+  pull_request:
+
+jobs:
+  firmware:
+    uses: elliotmatson/pio-actions/.github/workflows/build-release.yml@v1
+    permissions:
+      contents: write
+    with:
+      release-type: ${{ inputs.release-type || 'build' }}
+      release-version: ${{ inputs.release-version || '' }}
+      # hub builds both default_envs (hub, hub-debug); each gets its own job.
+      envs: default
+      post-build-run: python3 scripts/verify_fw_descriptor.py
+    secrets:
+      gh-token: ${{ secrets.GH_PAT }}
