@@ -75,6 +75,16 @@ on:
           FW_VERSION and RELEASE_TYPE are exported.
         type: string
         default: ""
+      release-notes:
+        description: >-
+          Markdown template prepended to the release description, resolved from
+          the repository root. {version}, {type}, {repo}, {sha}, {short_sha},
+          {date}, {envs} and {sizes} are substituted; anything else in braces is
+          left alone. GitHub's generated changelog follows it. Absent at the
+          default path is fine -- absent at a path you set is an error. Set to
+          "" to never look.
+        type: string
+        default: .github/release-notes.md
       retention-days:
         type: number
         default: 30
@@ -557,6 +567,18 @@ jobs:
     # ever builds pull requests -- to grant it. Callers that release grant
     # contents: write themselves and this inherits it.
     steps:
+      # Before the download: checkout empties the workspace, which would take
+      # dist with it.
+      - uses: actions/checkout@v4
+
+      - name: Check out pio-actions
+        if: inputs.release-notes != ''
+        uses: actions/checkout@v4
+        with:
+          repository: elliotmatson/pio-actions
+          ref: ${{ inputs.actions-ref }}
+          path: .pio-actions
+
       - uses: actions/download-artifact@v4
         with:
           pattern: firmware-*
@@ -570,9 +592,54 @@ jobs:
           sha256sum -- *.bin | tee SHA256SUMS
           ls -l
 
+      - name: Render the release notes
+        id: notes
+        if: inputs.release-notes != ''
+        env:
+          TEMPLATE: ${{ inputs.release-notes }}
+          # Keep in step with the input's default below.
+          DEFAULT: .github/release-notes.md
+          VERSION: ${{ needs.discover.outputs.version }}
+          RELEASE_TYPE: ${{ inputs.release-type }}
+          REPO: ${{ github.repository }}
+          ENVS: ${{ needs.discover.outputs.envs }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$TEMPLATE" ]; then
+            # A repo that has not written one yet still releases, with the
+            # generated notes alone. A path the caller typed out and got wrong
+            # is a different thing, and says so.
+            if [ "$TEMPLATE" = "$DEFAULT" ]; then
+              echo "::notice::no $TEMPLATE here; the release keeps GitHub's generated notes only"
+              exit 0
+            fi
+            echo "::error::release-notes points at $TEMPLATE, which does not exist"
+            exit 1
+          fi
+
+          python3 .pio-actions/scripts/release_notes.py \
+            --template "$TEMPLATE" \
+            --manifests dist \
+            --envs "$ENVS" \
+            --version "$VERSION" \
+            --type "$RELEASE_TYPE" \
+            --repo "$REPO" \
+            --sha "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/release-notes.md"
+
+          # Outside the workspace: the repository is checked out here and may
+          # well own a file by that name.
+          if [ -s "$RUNNER_TEMP/release-notes.md" ]; then
+            echo "path=$RUNNER_TEMP/release-notes.md" >> "$GITHUB_OUTPUT"
+            { echo "### Release notes"; cat "$RUNNER_TEMP/release-notes.md"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "dist/*.bin,dist/SHA256SUMS"
+          # GitHub prepends the body to the notes it generates, so the template
+          # leads and the changelog follows. An empty bodyFile is ignored.
+          bodyFile: ${{ steps.notes.outputs.path }}
           generateReleaseNotes: true
           tag: ${{ needs.discover.outputs.version }}
           commit: ${{ github.sha }}
