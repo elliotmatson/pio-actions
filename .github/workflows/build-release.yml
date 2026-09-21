@@ -62,11 +62,17 @@ on:
         type: string
         default: ""
       pre-build-run:
-        description: Shell to run in project-dir before `pio run`.
+        description: >-
+          Shell to run in project-dir before `pio run`. PIO_ENV, FW_VERSION and
+          RELEASE_TYPE are exported, so a hook can act per environment or only
+          for a release -- creating the tag that ESP-IDF derives PROJECT_VER
+          from, for instance.
         type: string
         default: ""
       post-build-run:
-        description: Shell to run in project-dir after a successful `pio run`.
+        description: >-
+          Shell to run in project-dir after a successful `pio run`. PIO_ENV,
+          FW_VERSION and RELEASE_TYPE are exported.
         type: string
         default: ""
       retention-days:
@@ -240,6 +246,8 @@ jobs:
         env:
           SCRIPT: ${{ inputs.pre-build-run }}
           PIO_ENV: ${{ matrix.env }}
+          FW_VERSION: ${{ needs.discover.outputs.version }}
+          RELEASE_TYPE: ${{ inputs.release-type }}
         run: bash -c "$SCRIPT"
 
       - name: Build ${{ matrix.env }}
@@ -266,6 +274,8 @@ jobs:
         env:
           SCRIPT: ${{ inputs.post-build-run }}
           PIO_ENV: ${{ matrix.env }}
+          FW_VERSION: ${{ needs.discover.outputs.version }}
+          RELEASE_TYPE: ${{ inputs.release-type }}
         run: bash -c "$SCRIPT"
 
       - name: Measure size

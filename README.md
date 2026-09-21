@@ -56,8 +56,11 @@ macros are a template — `-DFW_VERSION='"{version}"' -DFW_TYPE='"{type}"'
 that derives its version from `git describe` and wants no `FW_VERSION` at all,
 changes one input instead of maintaining its own workflow. `targets` builds
 extra `pio run` targets per environment, such as `buildfs` for a project that
-ships a filesystem image, and `PIO_ENV` is exported to the pre- and post-build
-hooks so they can tell which environment they are running for.
+ships a filesystem image. The pre- and post-build hooks get `PIO_ENV`,
+`FW_VERSION` and `RELEASE_TYPE`, so they can act per environment or only for a
+release — a project whose version comes from `git describe` uses that to create
+the tag before the build, since ESP-IDF reads `PROJECT_VER` from it and the
+release job only tags afterwards.
 
 **The merged image ships too.** pioarduino writes a `firmware.factory.bin`
 alongside the app image — bootloader, partition table and application already
