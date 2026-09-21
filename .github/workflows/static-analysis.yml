@@ -51,6 +51,15 @@ on:
           repositories, where this will fail.
         type: boolean
         default: false
+      skip-packages:
+        description: >-
+          Exclude installed packages from analysis. On by default, and it needs
+          to be: the pinned cppcheck cannot parse the xtensa toolchain's own
+          <type_traits>, and treats that as a breaking defect. A project can set
+          check_skip_packages in platformio.ini instead; this covers the ones
+          that have not.
+        type: boolean
+        default: true
       verbose:
         description: >-
           Run `pio check` verbosely. PlatformIO suppresses the reason a tool
@@ -111,6 +120,7 @@ jobs:
         env:
           ENVS_JSON: ${{ steps.envs.outputs.envs }}
           CHECK_FLAGS: ${{ inputs.check-flags }}
+          SKIP_PACKAGES: ${{ inputs.skip-packages }}
           VERBOSE: ${{ inputs.verbose }}
         run: |
           set -uo pipefail
@@ -119,6 +129,7 @@ jobs:
           args=()
           for name in "${names[@]}"; do args+=(-e "$name"); done
           read -ra extra <<< "$CHECK_FLAGS"
+          if [ "$SKIP_PACKAGES" = "true" ]; then extra+=(--skip-packages); fi
           if [ "$VERBOSE" = "true" ]; then extra+=(--verbose); fi
           # Never fail here: a defect above the threshold is reported by the
           # next step, after the annotations and the comment have been written.
@@ -168,7 +179,9 @@ jobs:
           args=()
           for name in "${names[@]}"; do args+=(-e "$name"); done
           echo "::group::pio check --verbose"
-          pio check "${args[@]}" --verbose 2>&1 | tail -120 || true
+          extra=()
+          if [ "${{ inputs.skip-packages }}" = "true" ]; then extra+=(--skip-packages); fi
+          pio check "${args[@]}" "${extra[@]}" --verbose 2>&1 | tail -120 || true
           echo "::endgroup::"
 
       - name: Upload SARIF

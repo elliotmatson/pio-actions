@@ -121,6 +121,14 @@ it cannot be the default for firmware work. The free path is not a consolation
 prize here: annotations sit on the diff being reviewed rather than in a separate
 tab.
 
+`--skip-packages` is on by default. It has to be: the cppcheck PlatformIO pins
+is from 2023 and cannot parse the xtensa toolchain's own `<type_traits>`, which
+it then treats as a breaking defect and fails the whole check over. Worse, it
+sets that failure flag outside the guard that prints the reason, so without
+`--verbose` you get a failed check and no explanation at all. Four of the
+firmware repos already set `check_skip_packages` in `platformio.ini`; this
+covers the ones that do not.
+
 Defects found in several environments are reported once, tagged with the
 environments they came from, so a shared header does not produce three
 identical annotations. A tool that fails to run is called out explicitly rather
