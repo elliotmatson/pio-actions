@@ -141,7 +141,9 @@ covers the ones that do not.
 Defects found in several environments are reported once, tagged with the
 environments they came from, so a shared header does not produce three
 identical annotations. A tool that fails to run is called out explicitly rather
-than passing as a clean report.
+than passing as a clean report, and so is `pio check` producing no output at
+all -- which is what happens when the platform cannot be resolved. An empty
+report is not zero defects; it means nothing was analysed.
 
 Annotations are capped (50 by default) so a noisy first run cannot bury the
 diff; the rest stay in the summary and the comment.

@@ -33,7 +33,11 @@ def load_results(text: str) -> list[dict]:
     """
     text = text.strip()
     if not text:
-        return []
+        # Not a clean bill of health. `pio check --json-output` always emits a
+        # document when it runs, so nothing at all means it never got that far
+        # -- an unresolvable platform, a failed install, a crash. Reporting
+        # "no defects found" there is the worst thing a lint step can do.
+        raise SystemExit("`pio check` produced no output, so it did not run")
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -227,6 +231,11 @@ def main() -> int:
 
     with open(args.input, encoding="utf-8") as fh:
         results = load_results(fh.read())
+
+    if not results:
+        # A document, but describing nothing. Every environment was filtered
+        # out or none could be processed; either way nothing was analysed.
+        raise SystemExit("`pio check` reported no environments; nothing was analysed")
 
     root = os.path.abspath(args.project_dir)
     defects = collect_defects(results, root)

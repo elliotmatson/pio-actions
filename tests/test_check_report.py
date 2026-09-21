@@ -43,8 +43,13 @@ def test_the_json_is_found_after_tool_manager_chatter():
     assert load_results(noisy)[0]["env"] == "esp32dev"
 
 
-def test_empty_output_is_not_an_error():
-    assert load_results("   ") == []
+def test_empty_output_is_an_error_not_a_clean_report():
+    # pio check emits a document whenever it runs, so nothing at all means it
+    # never ran. Treating that as zero defects reports a passing lint step for
+    # a tool that never started -- which is exactly what happened when a
+    # platform bump made the pinned PlatformIO incompatible.
+    with pytest.raises(SystemExit):
+        load_results("   ")
 
 
 def test_output_with_no_json_fails_loudly():
@@ -179,3 +184,36 @@ def test_sarif_regions_are_one_based():
     got = collect_defects([result(defects=[defect(line=0, column=0)])], ROOT)
     region = to_sarif(got)["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["region"]
     assert region["startLine"] == 1 and region["startColumn"] == 1
+
+
+
+def test_a_document_describing_no_environments_is_an_error(tmp_path):
+    # `[]` parses, but means nothing was analysed.
+    import subprocess
+    import sys
+
+    raw = tmp_path / "check-raw.txt"
+    raw.write_text("[]")
+    done = subprocess.run(
+        [sys.executable, "scripts/check_report.py", "--input", str(raw)],
+        capture_output=True, text=True,
+    )
+    assert done.returncode != 0
+    assert "no environments" in (done.stderr + done.stdout)
+
+
+def test_a_real_document_still_reports_normally(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    raw = tmp_path / "check-raw.txt"
+    raw.write_text(json.dumps([result(defects=[defect()])]))
+    out = tmp_path / "comment.md"
+    done = subprocess.run(
+        [sys.executable, "scripts/check_report.py", "--input", str(raw),
+         "--comment", str(out), "--fail-on", "high"],
+        capture_output=True, text=True,
+    )
+    assert done.returncode == 0
+    assert "1 defect" in out.read_text()
