@@ -73,7 +73,7 @@ jobs:
     env:
       # The envs examples/blink builds by default. Declared once: two steps
       # assert against it, and they must not be able to drift apart.
-      EXPECTED_ENVS: esp32dev esp32s3
+      EXPECTED_ENVS: esp32dev esp32s3 esp32dev-idf
       # examples/blink/partitions.csv: app0 and app1 are both 0x1E0000.
       EXPECTED_APP_PARTITION: "1966080"
     steps:

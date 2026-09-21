@@ -145,10 +145,11 @@ update has to fit whichever slot it lands in.
 | `firmware` | a real two-env build driven through `build-release.yml` |
 | `verify` | asserts the size manifests describe a plausible build |
 
-`examples/blink` is shaped like the repos this serves rather than minimized: two
-board envs so the matrix fans out, a host env for unit tests, a dual-OTA
-partition table, and blink timing extracted into `lib/blink` so the same code
-compiles for the firmware and for the host test runner. The rollover test is the
+`examples/blink` is shaped like the repos this serves rather than minimized:
+three board envs so the matrix fans out, one of them building Arduino as an
+ESP-IDF component the way the real firmware does, a host env for unit tests, a
+dual-OTA partition table, and blink timing extracted into `lib/blink` so the
+same code compiles for the firmware and for the host test runner. The rollover test is the
 reason that split earns its keep — a naive `now > last + interval` stalls for
 49.7 days after `millis()` wraps.
 
