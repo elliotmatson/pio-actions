@@ -73,9 +73,13 @@ otherwise appear in the diff as though the change had caused it.
 
 Sections say a change cost 4 KB of `.flash.text`. The comment also carries a
 per-symbol table saying *which function* it was, demangled, taken from the ELF
-symbol table — no extra tooling, and small enough to cache alongside the
-manifest. Only the largest symbols are recorded, so the table says when it has
-been truncated.
+symbol table — no extra tooling needed.
+
+Every sized symbol is recorded, not the largest N. Ranking by size and cutting
+sounds thrifty, but an ESP32 image's biggest symbols are newlib and FreeRTOS
+internals: capping at 500 on a blink sketch put the boundary at 100 bytes and
+hid every function in the sketch, which is exactly what a reviewer needs to
+see. The full table costs a couple of hundred kilobytes of JSON.
 
 Growth alone never fails the job — reviewers should see a delta, not be blocked
 by one. The job fails only when an image reaches `size-fail-pct` of its app

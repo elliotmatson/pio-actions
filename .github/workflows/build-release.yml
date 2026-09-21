@@ -272,12 +272,15 @@ jobs:
     steps:
       # Keyed on the base commit, so the baseline is built once per PR rather
       # than again on every push to the branch.
+      # The s2 in the key is a manifest-schema token. Bump it whenever the
+      # manifest's shape changes: a cached baseline of the old shape diffed
+      # against a new-shape head invents differences that are not real.
       - name: Restore cached baseline
         id: cache
         uses: actions/cache/restore@v4
         with:
           path: base-manifests
-          key: size-base-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
+          key: size-base-s2-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
 
       - uses: actions/checkout@v4
         if: steps.cache.outputs.cache-hit != 'true'
@@ -331,7 +334,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: base-manifests
-          key: size-base-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
+          key: size-base-s2-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
 
       - uses: actions/upload-artifact@v4
         if: success()

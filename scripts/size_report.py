@@ -50,17 +50,30 @@ def read_elf_sections(path: str) -> list[dict]:
     return out
 
 
-def read_elf_symbols(path: str, limit: int = 500) -> dict[str, int]:
-    """The largest symbols in the image, by size.
+def rank_symbols(totals: dict[str, int], limit: int = 0) -> dict[str, int]:
+    """Order symbols by size, optionally keeping only the largest.
+
+    A limit is off by default, and should stay off. Ranking by size sounds
+    reasonable until you notice what it discards: an ESP32 image's largest
+    symbols are newlib and FreeRTOS internals in the multi-kilobyte range, so
+    any cutoff generous enough to be small still lands well above application
+    code. Capping at 500 on a blink sketch put the boundary at 100 bytes, which
+    hid every function in the sketch itself -- that is, precisely the symbols
+    whose movement a reviewer needs to see.
+    """
+    ranked = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    return dict(ranked[:limit]) if limit else dict(ranked)
+
+
+def read_elf_symbols(path: str, limit: int = 0) -> dict[str, int]:
+    """Every sized symbol in the image, largest first.
 
     Sections say a change cost 4 KB of .flash.text; symbols say which function
     it was. Only .symtab is read -- .dynsym would double-count the same symbol
     -- and only sized FUNC/OBJECT entries, which excludes labels and sections.
 
-    Recording the top `limit` rather than everything keeps the manifest small
-    enough to cache and attach. A symbol near that cutoff can drop out of one
-    build's list and appear as a spurious delta, which is why the diff labels
-    the list as truncated.
+    The whole table runs to a couple of hundred kilobytes of JSON, which is
+    cheap next to being unable to answer the question.
     """
     from elftools.elf.elffile import ELFFile
     from elftools.elf.sections import SymbolTableSection
@@ -78,8 +91,7 @@ def read_elf_symbols(path: str, limit: int = 500) -> dict[str, int]:
                     continue
                 totals[symbol.name] = totals.get(symbol.name, 0) + size
 
-    ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
-    return dict(ranked[:limit]) if limit else dict(ranked)
+    return rank_symbols(totals, limit)
 
 
 def classify_sections(sections: list[dict]) -> dict:
@@ -241,7 +253,7 @@ def sha256(path: str) -> str:
 
 
 def build_manifest(build_dir: str, env: str, project_dir: str = ".",
-                   partitions: str = "", symbols: int = 500) -> dict:
+                   partitions: str = "", symbols: int = 0) -> dict:
     elf = os.path.join(build_dir, "firmware.elf")
     binary = os.path.join(build_dir, "firmware.bin")
 
@@ -249,7 +261,7 @@ def build_manifest(build_dir: str, env: str, project_dir: str = ".",
 
     if os.path.isfile(elf):
         manifest.update(classify_sections(read_elf_sections(elf)))
-        manifest["symbols"] = read_elf_symbols(elf, symbols) if symbols else {}
+        manifest["symbols"] = read_elf_symbols(elf, symbols)
         manifest["symbols_truncated"] = bool(symbols) and len(manifest["symbols"]) >= symbols
     else:
         manifest.update({"flash_bytes": None, "ram_bytes": None, "sections": {}})
@@ -310,8 +322,9 @@ def main() -> int:
     ap.add_argument("--project-dir", default=".")
     ap.add_argument("--partitions", default="",
                     help="override board_build.partitions")
-    ap.add_argument("--symbols", type=int, default=500,
-                    help="record this many of the largest symbols; 0 disables")
+    ap.add_argument("--symbols", type=int, default=0,
+                    help="keep only this many of the largest symbols; "
+                         "0 (the default) records them all")
     ap.add_argument("--output", default="", help="write the manifest JSON here")
     ap.add_argument("--summary", action="store_true",
                     help="append a one-line summary to $GITHUB_STEP_SUMMARY")
