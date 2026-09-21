@@ -1,0 +1,171 @@
+# Reusable host-side testing for PlatformIO projects.
+#
+# Runs `pio test` and reports it where a reviewer is looking: an annotation on
+# each failing assertion, a summary table, and a comment updated in place. A run
+# that executed no tests fails rather than passing -- a green test step for a
+# suite that never ran is the same defect as a clean lint report for a file
+# nobody opened.
+name: test
+
+on:
+  workflow_call:
+    inputs:
+      envs:
+        description: >-
+          Environments to test, usually a host one. "default" and "all" work as
+          they do elsewhere, but naming the environment is clearer: a board env
+          would try to run tests on hardware that is not attached.
+        type: string
+        default: native
+      runs-on:
+        description: >-
+          Use a self-hosted runner with a board attached to run the same suites
+          on target.
+        type: string
+        default: ubuntu-latest
+      python-version:
+        type: string
+        default: "3.12"
+      pio-version:
+        type: string
+        default: "6.1.19"
+      project-dir:
+        type: string
+        default: "."
+      filter:
+        description: Restrict to matching tests, passed to `pio test --filter`.
+        type: string
+        default: ""
+      test-flags:
+        description: Extra arguments passed through to `pio test`.
+        type: string
+        default: ""
+      comment:
+        description: >-
+          Post the results as a pull-request comment, updated in place. Needs
+          pull-requests: write on the calling job.
+        type: boolean
+        default: true
+      cache-packages:
+        type: boolean
+        default: true
+      actions-ref:
+        type: string
+        default: v1
+    secrets:
+      gh-token:
+        required: false
+    outputs:
+      tests:
+        description: Number of test cases that ran.
+        value: ${{ jobs.test.outputs.tests }}
+      failed:
+        description: Number that failed or errored.
+        value: ${{ jobs.test.outputs.failed }}
+
+jobs:
+  test:
+    name: pio test
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      tests: ${{ steps.report.outputs.tests }}
+      failed: ${{ steps.report.outputs.failed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out pio-actions
+        uses: actions/checkout@v4
+        with:
+          repository: elliotmatson/pio-actions
+          ref: ${{ inputs.actions-ref }}
+          path: .pio-actions
+
+      # Validates the names against platformio.ini, so a typo says which
+      # environments exist instead of failing inside pio.
+      - id: envs
+        uses: ./.pio-actions/actions/list-envs
+        with:
+          project-dir: ${{ inputs.project-dir }}
+          select: ${{ inputs.envs }}
+
+      - uses: ./.pio-actions/actions/setup-pio
+        with:
+          pio-version: ${{ inputs.pio-version }}
+          python-version: ${{ inputs.python-version }}
+          project-dir: ${{ inputs.project-dir }}
+          cache-packages: ${{ inputs.cache-packages }}
+          gh-token: ${{ secrets.gh-token }}
+
+      - name: Run pio test
+        working-directory: ${{ inputs.project-dir }}
+        env:
+          ENVS_JSON: ${{ steps.envs.outputs.envs }}
+          FILTER: ${{ inputs.filter }}
+          TEST_FLAGS: ${{ inputs.test-flags }}
+        run: |
+          set -uo pipefail
+          mapfile -t names < <(printf '%s' "$ENVS_JSON" \
+            | python3 -c 'import json,sys; [print(e) for e in json.load(sys.stdin)]')
+          args=()
+          for name in "${names[@]}"; do args+=(-e "$name"); done
+          if [ -n "$FILTER" ]; then args+=(--filter "$FILTER"); fi
+          read -ra extra <<< "$TEST_FLAGS"
+          # A failing test must not end the job here: the report is written
+          # first so the annotations and the comment exist before it fails.
+          pio test "${args[@]}" "${extra[@]}" --junit-output-path test-results.xml || true
+
+      - name: Report
+        id: report
+        continue-on-error: true
+        env:
+          PROJECT_DIR: ${{ inputs.project-dir }}
+        run: |
+          python3 .pio-actions/scripts/test_report.py \
+            --input "$PROJECT_DIR/test-results.xml" \
+            --project-dir "$PROJECT_DIR" \
+            --comment test-comment.md
+
+      - uses: actions/upload-artifact@v4
+        if: hashFiles(format('{0}/test-results.xml', inputs.project-dir)) != ''
+        with:
+          name: test-results
+          path: ${{ inputs.project-dir }}/test-results.xml
+          retention-days: 7
+
+      - name: Post or update the test comment
+        if: inputs.comment && github.event_name == 'pull_request' && hashFiles('test-comment.md') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          marker='<!-- pio-actions:tests -->'
+          python3 -c 'import json;print(json.dumps({"body":open("test-comment.md").read()}))' > payload.json
+
+          existing=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" \
+            --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty" \
+            2>/dev/null || true)
+
+          if [ -n "$existing" ]; then
+            target="repos/$REPO/issues/comments/$existing"; method=PATCH
+          else
+            target="repos/$REPO/issues/$PR/comments"; method=POST
+          fi
+
+          if ! gh api -X "$method" "$target" --input payload.json >/dev/null; then
+            echo "::warning::Could not post the test comment. Grant the calling \
+          job pull-requests: write, or read the results in the job summary above."
+          fi
+
+      - name: Fail on test failures
+        if: steps.report.outcome == 'failure'
+        env:
+          TESTS: ${{ steps.report.outputs.tests }}
+        run: |
+          if [ -z "$TESTS" ] || [ "$TESTS" = "0" ]; then
+            echo "::error::no tests ran; the suite did not execute"
+          else
+            echo "::error::tests failed"
+          fi
+          exit 1
