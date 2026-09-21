@@ -95,8 +95,27 @@ jobs:
     outputs:
       envs: ${{ steps.envs.outputs.envs }}
       version: ${{ steps.version.outputs.version }}
+      baseline-sha: ${{ steps.baseline.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Needed to resolve the merge base below.
+          fetch-depth: ${{ inputs.fetch-depth }}
+
+      - name: Resolve the baseline commit
+        id: baseline
+        if: github.event_name == 'pull_request'
+        env:
+          FALLBACK: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # HEAD is the merge commit GitHub generates for the pull request:
+          # parent 1 is the base branch tip, parent 2 is the pull request head.
+          # Their merge base is where this change actually diverged. base.sha
+          # would instead follow the base branch as it moves, quietly folding
+          # other people's commits into the diff.
+          sha=$(git merge-base "HEAD^1" "HEAD^2" 2>/dev/null || echo "$FALLBACK")
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "baseline: $sha"
 
       # A release with no version would publish binaries named after a
       # placeholder, so refuse before spending a build on it.
@@ -258,12 +277,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: base-manifests
-          key: size-base-${{ runner.os }}-${{ matrix.env }}-${{ github.event.pull_request.base.sha }}
+          key: size-base-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
 
       - uses: actions/checkout@v4
         if: steps.cache.outputs.cache-hit != 'true'
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ needs.discover.outputs.baseline-sha }}
           fetch-depth: ${{ inputs.fetch-depth }}
 
       - name: Check out pio-actions
@@ -312,7 +331,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: base-manifests
-          key: size-base-${{ runner.os }}-${{ matrix.env }}-${{ github.event.pull_request.base.sha }}
+          key: size-base-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
 
       - uses: actions/upload-artifact@v4
         if: success()
@@ -359,7 +378,7 @@ jobs:
         # Values reach the script through the environment rather than being
         # interpolated into the shell.
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ needs.discover.outputs.baseline-sha }}
           WARN_BYTES: ${{ inputs.size-warn-bytes }}
           FAIL_PCT: ${{ inputs.size-fail-pct }}
         run: |

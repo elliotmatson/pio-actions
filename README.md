@@ -63,9 +63,19 @@ per-section breakdown of what moved. The comment is updated in place rather than
 appended, and the baseline is cached against the base commit so it is built once
 per pull request rather than on every push to the branch.
 
+The baseline is the **merge base** of the pull request, not the base branch
+tip. `base.sha` follows the base branch as it moves, which would quietly fold
+other people's commits into your diff.
+
 The baseline is built with the *head* version string on purpose: a different
 `FW_VERSION` is a different number of bytes of `.rodata`, and that noise would
 otherwise appear in the diff as though the change had caused it.
+
+Sections say a change cost 4 KB of `.flash.text`. The comment also carries a
+per-symbol table saying *which function* it was, demangled, taken from the ELF
+symbol table — no extra tooling, and small enough to cache alongside the
+manifest. Only the largest symbols are recorded, so the table says when it has
+been truncated.
 
 Growth alone never fails the job — reviewers should see a delta, not be blocked
 by one. The job fails only when an image reaches `size-fail-pct` of its app
@@ -91,6 +101,7 @@ like `huge_app.csv`. This is what the memory-diff workflow will diff.
 | `actions/firmware-size` | Size manifest for one built environment |
 | `scripts/` | The Python behind the actions, unit-tested in `tests/` |
 | `examples/blink` | Fixture firmware the workflows are tested against |
+| `scripts/size_diff.py` | Renders the pull-request size comment |
 | `.github/workflows/tests.yml` | Everything above, run on every push and PR |
 
 ### The PlatformIO pin
