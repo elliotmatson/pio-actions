@@ -113,6 +113,41 @@ flash/RAM section totals, and the percentage of the app partition consumed —
 read from the project's real partition table, including framework-shipped ones
 like `huge_app.csv`. This is what the memory-diff workflow will diff.
 
+## Release notes
+
+A release description is the generated changelog and nothing else, which for
+firmware leaves out everything a person downloading it actually needs: which
+file to flash, what the `-factory` image is for, how big the images came out.
+
+Write `.github/release-notes.md` in the repo and it is prepended to every
+release, with the generated changelog after it. No workflow change is needed —
+the file existing is what turns it on, and a repo without one releases exactly
+as before. [`examples/release-notes.md`](examples/release-notes.md) is a
+starting point.
+
+These tokens are substituted:
+
+| Token | Value |
+| --- | --- |
+| `{version}` | the release version, which is also the tag |
+| `{type}` | `stable` or `beta` |
+| `{repo}` | `owner/name` |
+| `{sha}`, `{short_sha}` | the released commit |
+| `{date}` | build date, UTC, `YYYY-MM-DD` |
+| `{envs}` | the environments built, as a comma-separated list |
+| `{sizes}` | a table of image size, app-partition use, flash and RAM per environment |
+
+Anything else in braces is left alone, so a flashing command with `${PORT}` in
+it or a JSON example survives untouched.
+
+`{sizes}` comes from the same manifests the pull-request size diff reads, so
+the numbers published with a release are the ones CI measured, not a figure
+copied by hand from a build log that has since scrolled away.
+
+Point `release-notes` at a different path to move the file, or set it to `""`
+to never look. A missing file at the default path is a notice; a missing file
+at a path you set is an error, because that is a typo rather than a choice.
+
 ## Static analysis
 
 ```yaml
