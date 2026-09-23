@@ -369,7 +369,7 @@ jobs:
       # against a new-shape head invents differences that are not real.
       - name: Restore cached baseline
         id: cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: base-manifests
           key: size-base-s2-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
@@ -458,7 +458,7 @@ jobs:
       # with an empty directory that later runs would treat as a hit.
       - name: Cache the baseline
         if: success() && steps.cache.outputs.cache-hit != 'true' && steps.baseline-env.outputs.present == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: base-manifests
           key: size-base-s2-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
