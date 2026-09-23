@@ -1,0 +1,47 @@
+# Keeps examples/blink on current dependencies. It is only an example, but it
+# is also what the e2e suite builds, so a stale platform here means this repo
+# tests against a different toolchain than the firmware it serves ships on.
+name: dependency-updates
+
+on:
+  schedule:
+    # Mondays, early -- the same slot as the firmware repos.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      cooldown:
+        description: Days a release must have been out before it is proposed.
+        type: string
+        default: "3"
+
+jobs:
+  update:
+    name: Check for dependency updates
+    # Not the claraxio runners: those serve the Command-Commissioning org, and
+    # this repo lives on a personal account.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The updater sets its own remote carrying the token below; checkout's
+          # credential header would otherwise override it.
+          persist-credentials: false
+
+      - name: Check for dependency updates
+        uses: elliotmatson/platformio-dependency-updater@cc-v1
+        with:
+          # A PAT, when one is configured, so the pull request starts CI -- the
+          # workflow token's PRs never do, and a platform bump that the e2e
+          # suite has not built is not worth much. Falls back to the workflow
+          # token, which can resolve blink's dependencies since all are public.
+          token: ${{ secrets.GH_PAT || github.token }}
+          project-dir: examples/blink
+          pin-ranges: true
+          cooldown: ${{ inputs.cooldown || '3' }}
+          labels: dependencies,platformio
+          open-pull-requests-limit: 5
