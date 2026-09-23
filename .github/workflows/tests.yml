@@ -129,7 +129,7 @@ jobs:
       # examples/blink/partitions.csv: app0 and app1 are both 0x1E0000.
       EXPECTED_APP_PARTITION: "1966080"
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: firmware-*
           merge-multiple: true

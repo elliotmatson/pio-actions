@@ -487,13 +487,13 @@ jobs:
           ref: ${{ inputs.actions-ref }}
           path: .pio-actions
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: firmware-*
           merge-multiple: true
           path: head
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           pattern: base-manifest-*
@@ -579,7 +579,7 @@ jobs:
           ref: ${{ inputs.actions-ref }}
           path: .pio-actions
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: firmware-*
           merge-multiple: true
