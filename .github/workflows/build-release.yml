@@ -133,7 +133,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       baseline-sha: ${{ steps.baseline.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Needed to resolve the merge base below.
           fetch-depth: ${{ inputs.fetch-depth }}
@@ -181,7 +181,7 @@ jobs:
           echo "Building version $version"
 
       - name: Check out pio-actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: elliotmatson/pio-actions
           ref: ${{ inputs.actions-ref }}
@@ -204,12 +204,12 @@ jobs:
       matrix:
         env: ${{ fromJSON(needs.discover.outputs.envs) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: ${{ inputs.fetch-depth }}
 
       - name: Check out pio-actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: elliotmatson/pio-actions
           ref: ${{ inputs.actions-ref }}
@@ -374,7 +374,7 @@ jobs:
           path: base-manifests
           key: size-base-s2-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.cache.outputs.cache-hit != 'true'
         with:
           ref: ${{ needs.discover.outputs.baseline-sha }}
@@ -382,7 +382,7 @@ jobs:
 
       - name: Check out pio-actions
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: elliotmatson/pio-actions
           ref: ${{ inputs.actions-ref }}
@@ -481,7 +481,7 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
     steps:
       - name: Check out pio-actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: elliotmatson/pio-actions
           ref: ${{ inputs.actions-ref }}
@@ -569,11 +569,11 @@ jobs:
     steps:
       # Before the download: checkout empties the workspace, which would take
       # dist with it.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check out pio-actions
         if: inputs.release-notes != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: elliotmatson/pio-actions
           ref: ${{ inputs.actions-ref }}

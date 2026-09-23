@@ -30,7 +30,7 @@ jobs:
     name: python unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -41,7 +41,7 @@ jobs:
     name: workflow syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # These workflows are the product: a syntax error here breaks every
       # consuming repo at once, not just this one.
       - uses: raven-actions/actionlint@v2
@@ -63,7 +63,7 @@ jobs:
     name: setup-pio exports its token
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./actions/setup-pio
         with:
           project-dir: examples/blink
