@@ -101,10 +101,10 @@ jobs:
     outputs:
       total: ${{ steps.report.outputs.total }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check out pio-actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: elliotmatson/pio-actions
           ref: ${{ inputs.actions-ref }}
