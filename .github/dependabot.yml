@@ -5,7 +5,17 @@
 
 version: 2
 updates:
-  - package-ecosystem: "github-actions" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "github-actions"
+    # "/" covers .github/workflows and a root action.yml -- and nothing else.
+    # actions/setup-pio/action.yml is a composite action in a subdirectory, so
+    # it is invisible to Dependabot without being named here. It went a full
+    # major behind on setup-python and cache that way, in the one file every
+    # consumer repo runs.
+    directories:
+      - "/"
+      # Glob rather than naming setup-pio: list-envs and firmware-size have no
+      # `uses:` today, but the failure is silent when that changes, so the
+      # pattern covers whatever is added later too.
+      - "/actions/*"
     schedule:
       interval: "weekly"

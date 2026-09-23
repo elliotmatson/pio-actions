@@ -50,6 +50,18 @@ forever, so bumping a platform silently reused the toolchain cache built for
 the previous one. Keys now hash `platformio.ini`, with `restore-keys` for a
 warm start on a miss.
 
+**And the cache turns itself off where it is a cost.** On a self-hosted runner
+whose `~/.platformio` persists between jobs, a hit is pure overhead. Measured on
+one: 795 MB + 1712 MB restored in 6m57s, 236s of that spent unpacking, to
+produce files already on the volume — most of an 8-minute job. The entries are
+also ~2.5 GB against GitHub's 10 GB per-repo limit, so they evict each other and
+a lookup usually misses anyway, leaving only the upload cost.
+
+`cache` and `cache-packages` therefore default to `auto`: cache on
+GitHub-hosted runners, skip on self-hosted. A self-hosted runner that is
+genuinely ephemeral does want the cache, so `true` and `false` force it either
+way.
+
 **Projects differ, and the workflow bends rather than forking.** The version
 macros are a template — `-DFW_VERSION='"{version}"' -DFW_TYPE='"{type}"'
 -DREPO_URL='"{repo}"'` by default — so a project reading `REPO_PATH`, or one

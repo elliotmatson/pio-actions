@@ -80,9 +80,20 @@ on:
         description: Extra arguments passed through to `pio check`.
         type: string
         default: ""
+      cache:
+        description: >-
+          Cache pip downloads and the PlatformIO download cache. "auto" caches
+          on GitHub-hosted runners and skips it on self-hosted ones, where
+          ~/.platformio usually persists and a restore costs more than it
+          saves. "true" and "false" force it either way.
+        type: string
+        default: auto
       cache-packages:
-        type: boolean
-        default: true
+        description: >-
+          Also cache extracted platforms and toolchains. Same auto/true/false
+          meaning as `cache`.
+        type: string
+        default: auto
       actions-ref:
         type: string
         default: v1
@@ -121,6 +132,7 @@ jobs:
           pio-version: ${{ inputs.pio-version }}
           python-version: ${{ inputs.python-version }}
           project-dir: ${{ inputs.project-dir }}
+          cache: ${{ inputs.cache }}
           cache-packages: ${{ inputs.cache-packages }}
           gh-token: ${{ secrets.gh-token }}
 

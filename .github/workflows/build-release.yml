@@ -88,9 +88,20 @@ on:
       retention-days:
         type: number
         default: 30
+      cache:
+        description: >-
+          Cache pip downloads and the PlatformIO download cache. "auto" caches
+          on GitHub-hosted runners and skips it on self-hosted ones, where
+          ~/.platformio usually persists and a restore costs more than it
+          saves. "true" and "false" force it either way.
+        type: string
+        default: auto
       cache-packages:
-        type: boolean
-        default: true
+        description: >-
+          Also cache extracted platforms and toolchains. Same auto/true/false
+          meaning as `cache`.
+        type: string
+        default: auto
       size-diff:
         description: >-
           On pull requests, build the base commit too and post the flash/RAM
@@ -234,6 +245,7 @@ jobs:
           pio-version: ${{ inputs.pio-version }}
           python-version: ${{ inputs.python-version }}
           project-dir: ${{ inputs.project-dir }}
+          cache: ${{ inputs.cache }}
           cache-packages: ${{ inputs.cache-packages }}
           gh-token: ${{ secrets.gh-token }}
 
@@ -412,6 +424,7 @@ jobs:
           pio-version: ${{ inputs.pio-version }}
           python-version: ${{ inputs.python-version }}
           project-dir: ${{ inputs.project-dir }}
+          cache: ${{ inputs.cache }}
           cache-packages: ${{ inputs.cache-packages }}
           gh-token: ${{ secrets.gh-token }}
 
