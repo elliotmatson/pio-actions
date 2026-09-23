@@ -340,7 +340,7 @@ jobs:
           stage spiffs.bin spiffs
           ls -l dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: firmware-${{ matrix.env }}
           path: ${{ inputs.project-dir }}/dist/*
@@ -463,7 +463,7 @@ jobs:
           path: base-manifests
           key: size-base-s2-${{ runner.os }}-${{ matrix.env }}-${{ needs.discover.outputs.baseline-sha }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: success() && (steps.cache.outputs.cache-hit == 'true' || steps.baseline-env.outputs.present == 'true')
         with:
           name: base-manifest-${{ matrix.env }}

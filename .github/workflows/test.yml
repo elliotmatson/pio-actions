@@ -125,7 +125,7 @@ jobs:
             --project-dir "$PROJECT_DIR" \
             --comment test-comment.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: hashFiles(format('{0}/test-results.xml', inputs.project-dir)) != ''
         with:
           name: test-results
