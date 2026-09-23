@@ -27,8 +27,11 @@ on:
         type: string
         default: "3.12"
       pio-version:
+        description: >-
+          PlatformIO core version. "latest" suits pioarduino 55.03.312 and
+          later; a project on 55.03.311 or earlier must pass "6.1.19".
         type: string
-        default: "6.1.19"
+        default: latest
       project-dir:
         type: string
         default: "."

@@ -269,8 +269,8 @@ suites on target.
 
 ### The PlatformIO pin
 
-`setup-pio` pins PlatformIO by default and accepts `pio-version: latest` to
-leave it floating. The two settings are coupled to the platform, in opposite
+`setup-pio` installs the latest PlatformIO by default, and accepts a pinned
+`pio-version`. The version is coupled to the pioarduino platform, in opposite
 directions:
 
 | pioarduino platform | `6.1.19` | `latest` (6.2.x) |
@@ -278,17 +278,14 @@ directions:
 | 55.03.311 and earlier | works | `No module named 'SCons.Tool.FortranCommon'` |
 | 55.03.312 and later | `IncompatiblePlatform` | works |
 
-There is no single value that satisfies both, so a project bumping to 55.03.312
-has to pass `latest` in the same change. The default stays pinned until the
-repos have moved.
+No single value satisfies both, so the default follows the fleet. It was
+`6.1.19` until every consumer had moved to 55.03.312, and is now `latest`. A
+project still on 55.03.311 or earlier passes `pio-version: "6.1.19"`.
 
-
-`setup-pio` defaults to `platformio==6.1.19`, not `--upgrade`. PlatformIO 6.2.0
-requires `tool-scons ~4.41101.0` and installs it over the SCons 4.8.1 that
-pioarduino pins, which fails the build with `No module named
-'SCons.Tool.FortranCommon'`. Floating the version meant CI broke with no change
-to the repo. It now lives in one place; bump it here when pioarduino and
-PlatformIO core agree on a newer SCons.
+The trade-off of floating is the one that motivated the pin in the first place:
+a new PlatformIO release can break CI with no change to the repo. When that
+happens, pin the last good version in the caller rather than here, so one
+project's workaround does not hold every other project back.
 
 ## How sizes are counted
 

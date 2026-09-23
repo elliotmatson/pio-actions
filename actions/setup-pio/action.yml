@@ -6,18 +6,16 @@ description: >-
 inputs:
   pio-version:
     description: >-
-      PlatformIO core version, or "latest" to leave it unpinned.
+      PlatformIO core version, or "latest" (the default) to leave it unpinned.
 
-      The default is pinned because PlatformIO 6.2.0 wants tool-scons
-      ~4.41101.0 and installs it over the SCons 4.8.1 that pioarduino 55.03.311
-      and earlier pin, which breaks the build with "No module named
-      'SCons.Tool.FortranCommon'".
+      The version is coupled to the pioarduino platform. 55.03.312 and later
+      require Core >= 6.2.0, which is what "latest" gives. 55.03.311 and earlier
+      break under 6.2.0 -- it installs tool-scons ~4.41101.0 over the SCons
+      4.8.1 they pin, failing with "No module named 'SCons.Tool.FortranCommon'"
+      -- so a project still on one of those must pass "6.1.19".
 
-      pioarduino 55.03.312 resolves that, and in turn requires Core >= 6.2.0 --
-      so a project on 55.03.312 or later must pass "latest", and the two
-      settings move together. Bump the default here once the repos have caught
-      up.
-    default: "6.1.19"
+      The default was 6.1.19 until every consumer had moved to 55.03.312.
+    default: latest
   python-version:
     default: "3.12"
   gh-token:
