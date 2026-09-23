@@ -28,14 +28,16 @@ inputs:
   project-dir:
     default: "."
   cache:
-    description: Cache pip downloads and the PlatformIO download cache.
-    default: "true"
+    description: >-
+      Cache pip downloads and the PlatformIO download cache. "auto" (the
+      default) caches on GitHub-hosted runners and skips it on self-hosted
+      ones. "true" and "false" force it either way.
+    default: auto
   cache-packages:
     description: >-
       Also cache extracted platforms and toolchains (~/.platformio/packages).
-      Saves the unpack step as well as the download, at the cost of a cache
-      entry big enough to matter against the 10 GB per-repo limit.
-    default: "true"
+      Same auto/true/false meaning as `cache`, and ignored when `cache` is off.
+    default: auto
 
 outputs:
   cache-hit:
@@ -52,8 +54,44 @@ runs:
     # Keyed on platformio.ini, unlike the per-repo copies this replaces: those
     # used a constant key, so bumping a platform silently reused the toolchain
     # built for the old one. restore-keys still gives a warm start on a miss.
+    # Measured on a self-hosted runner with a persisted ~/.platformio: a hit
+    # restored 795 MB + 1712 MB in 6m57s, of which 236s was unpacking, to
+    # produce files already on the volume -- most of an 8-minute job. The
+    # entries are also ~2.5 GB against a 10 GB per-repo limit, so they evict
+    # each other and a lookup usually misses anyway. Skipping the cache where
+    # the tool directory survives is strictly faster.
+    #
+    # A self-hosted runner that is genuinely ephemeral wants the cache, so this
+    # is a default rather than a rule: pass cache: true to force it back on.
+    - name: Decide whether to cache
+      id: cachecfg
+      shell: bash
+      env:
+        CACHE: ${{ inputs.cache }}
+        CACHE_PACKAGES: ${{ inputs.cache-packages }}
+        ENVIRONMENT: ${{ runner.environment }}
+      run: |
+        set -euo pipefail
+        resolve() {
+          case "$1" in
+            true)  echo true ;;
+            false) echo false ;;
+            *)     if [ "$ENVIRONMENT" = "self-hosted" ]; then echo false; else echo true; fi ;;
+          esac
+        }
+        downloads=$(resolve "$CACHE")
+        packages=$(resolve "$CACHE_PACKAGES")
+        # The packages cache is a subset of the same decision: caching the
+        # unpacked toolchain without the downloads that built it is incoherent.
+        [ "$downloads" = "true" ] || packages=false
+        {
+          echo "downloads=$downloads"
+          echo "packages=$packages"
+        } >> "$GITHUB_OUTPUT"
+        echo "runner.environment=$ENVIRONMENT -> cache downloads=$downloads, packages=$packages"
+
     - name: Cache pip and PlatformIO downloads
-      if: inputs.cache == 'true'
+      if: steps.cachecfg.outputs.downloads == 'true'
       uses: actions/cache@v4
       with:
         path: |
@@ -66,7 +104,7 @@ runs:
 
     - name: Cache PlatformIO platforms and toolchains
       id: cache-packages
-      if: inputs.cache == 'true' && inputs.cache-packages == 'true'
+      if: steps.cachecfg.outputs.packages == 'true'
       uses: actions/cache@v4
       with:
         path: |
