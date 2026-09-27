@@ -80,6 +80,34 @@ jobs:
           fi
           echo "GH_TOKEN is set for subsequent steps"
 
+  isolate-core:
+    name: setup-pio isolates the core per platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Forced on: "auto" only isolates on self-hosted runners, and this runs on a
+      # hosted one. Caching off, as it would be where isolation is the default.
+      - uses: ./actions/setup-pio
+        id: pio
+        with:
+          project-dir: examples/blink
+          isolate-core: "true"
+          cache: "false"
+      - name: The core must be per-platform and exported
+        env:
+          CORE_OUT: ${{ steps.pio.outputs.core-dir }}
+        run: |
+          set -euo pipefail
+          case "${PLATFORMIO_CORE_DIR:-}" in
+            "$HOME"/.platformio-cores/*) ;;
+            *) echo "::error::PLATFORMIO_CORE_DIR not set to a per-platform core: '${PLATFORMIO_CORE_DIR:-}'"; exit 1 ;;
+          esac
+          [ "$CORE_OUT" = "$PLATFORMIO_CORE_DIR" ] || { echo "::error::core-dir output '$CORE_OUT' != env '$PLATFORMIO_CORE_DIR'"; exit 1; }
+          grep -q . "$PLATFORMIO_CORE_DIR/.platforms" || { echo "::error::.platforms is empty"; exit 1; }
+          # PlatformIO itself has to agree, or the isolation is only on paper.
+          pio system info | tee info.txt
+          grep -F "$PLATFORMIO_CORE_DIR" info.txt
+
   firmware:
     name: build examples/blink
     uses: ./.github/workflows/build-release.yml
