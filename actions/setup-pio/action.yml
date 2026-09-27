@@ -36,11 +36,32 @@ inputs:
       Also cache extracted platforms and toolchains (~/.platformio/packages).
       Same auto/true/false meaning as `cache`, and ignored when `cache` is off.
     default: auto
+  isolate-core:
+    description: >-
+      Give each distinct set of `platform =` lines in platformio.ini its own
+      PlatformIO core directory (PLATFORMIO_CORE_DIR), under
+      ~/.platformio-cores/. "auto" (the default) does this on self-hosted
+      runners whenever the package cache is off -- the case where ~/.platformio
+      is a persistent volume shared by every job on the host. "true" and "false"
+      force it either way.
+
+      Why: the pioarduino platforms install each toolchain under a fixed,
+      unversioned name, in both ~/.platformio/tools and ~/.platformio/packages.
+      Two jobs on different platform versions sharing one core overwrite each
+      other's toolchain. An IDF 6 trial branch installed xtensa-esp-elf 15.2
+      over the 14.2 that the IDF 5.5 builds use, and every later job on that
+      runner failed with "Missing toolchain directory". A core per platform
+      costs a cold install the first time a platform is used and ~2.5 GB of disk
+      per platform; cores unused for 30 days are removed.
+    default: auto
 
 outputs:
   cache-hit:
     description: Whether the toolchain cache was an exact hit.
     value: ${{ steps.cache-packages.outputs.cache-hit }}
+  core-dir:
+    description: The PlatformIO core directory in use (empty when not isolated).
+    value: ${{ steps.isolate.outputs.core-dir }}
 
 runs:
   using: composite
@@ -87,6 +108,68 @@ runs:
           echo "packages=$packages"
         } >> "$GITHUB_OUTPUT"
         echo "runner.environment=$ENVIRONMENT -> cache downloads=$downloads, packages=$packages"
+
+    # Before anything runs pio: PLATFORMIO_CORE_DIR has to be in place for the
+    # first install, or the platform lands in the shared core after all.
+    - name: Isolate the PlatformIO core per platform
+      id: isolate
+      shell: bash
+      env:
+        ISOLATE: ${{ inputs.isolate-core }}
+        ENVIRONMENT: ${{ runner.environment }}
+        PACKAGES_CACHED: ${{ steps.cachecfg.outputs.packages }}
+        PROJECT_DIR: ${{ inputs.project-dir }}
+      run: |
+        set -euo pipefail
+        case "$ISOLATE" in
+          true)  isolate=true ;;
+          false) isolate=false ;;
+          *)     if [ "$ENVIRONMENT" = "self-hosted" ] && [ "$PACKAGES_CACHED" != "true" ]; then isolate=true; else isolate=false; fi ;;
+        esac
+        # The cache steps below save and restore ~/.platformio, so an isolated
+        # core with caching on would cache the wrong directory.
+        if [ "$isolate" = "true" ] && [ "$PACKAGES_CACHED" = "true" ]; then
+          echo "::warning::isolate-core with cache-packages on: the cache covers ~/.platformio, not the isolated core"
+        fi
+        if [ "$isolate" != "true" ]; then
+          echo "PlatformIO core: shared (~/.platformio)"
+          echo "core-dir=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        ini="$PROJECT_DIR/platformio.ini"
+        # Every `platform =` value, comments and trailing space stripped, in a
+        # stable order. Two projects on the same platform share a core; any
+        # difference in the line -- a version bump, a trial URL -- gets its own.
+        platforms=""
+        if [ -f "$ini" ]; then
+          platforms=$(sed -nE 's/^[[:space:]]*platform[[:space:]]*=[[:space:]]*([^;#]*).*/\1/p' "$ini" \
+                      | sed -E 's/[[:space:]]+$//' | sort -u)
+        fi
+        if command -v sha256sum >/dev/null; then hash=sha256sum; else hash="shasum -a 256"; fi
+        key=$(printf '%s\n' "$platforms" | $hash | cut -c1-12)
+        root="$HOME/.platformio-cores"
+        core="$root/$key"
+        mkdir -p "$core"
+        printf '%s\n' "$platforms" > "$core/.platforms"
+        touch "$core/.last-used"
+
+        # Prune cores no job has used for 30 days. Keyed on .last-used rather
+        # than the directory's mtime, which only moves when entries are added.
+        for dir in "$root"/*/; do
+          [ -f "$dir.last-used" ] || continue
+          [ "${dir%/}" = "$core" ] && continue
+          if [ -n "$(find "$dir.last-used" -mtime +30 2>/dev/null)" ]; then
+            echo "Removing unused PlatformIO core ${dir%/}"
+            rm -rf "${dir%/}"
+          fi
+        done
+
+        echo "PLATFORMIO_CORE_DIR=$core" >> "$GITHUB_ENV"
+        echo "core-dir=$core" >> "$GITHUB_OUTPUT"
+        echo "PlatformIO core: $core"
+        echo "for platform(s):"
+        printf '  %s\n' $platforms
 
     - name: Cache pip and PlatformIO downloads
       if: steps.cachecfg.outputs.downloads == 'true'

@@ -62,6 +62,18 @@ GitHub-hosted runners, skip on self-hosted. A self-hosted runner that is
 genuinely ephemeral does want the cache, so `true` and `false` force it either
 way.
 
+**A persistent core is split by platform.** Without the cache, every job on a
+self-hosted host shares one `~/.platformio`, and the pioarduino platforms install
+each toolchain under a fixed, unversioned name, in both `tools/` and `packages/`.
+So a branch trying a new platform replaces the toolchain every other build on the
+host is using. An IDF 6 trial installed `xtensa-esp-elf` 15.2 over the 14.2 that
+the IDF 5.5 builds need, and every later job on that runner failed with
+`Missing toolchain directory`. `isolate-core` (default `auto`: on for self-hosted
+runners without the package cache) points `PLATFORMIO_CORE_DIR` at
+`~/.platformio-cores/<hash of the platform lines>`, so each platform gets its own
+toolchains. The cost is a cold install the first time a platform is used, and
+about 2.5 GB of disk per platform. Cores no job has used for 30 days are deleted.
+
 **Projects differ, and the workflow bends rather than forking.** The version
 macros are a template — `-DFW_VERSION='"{version}"' -DFW_TYPE='"{type}"'
 -DREPO_URL='"{repo}"'` by default — so a project reading `REPO_PATH`, or one
