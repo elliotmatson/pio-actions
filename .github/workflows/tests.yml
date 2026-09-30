@@ -104,6 +104,13 @@ jobs:
           esac
           [ "$CORE_OUT" = "$PLATFORMIO_CORE_DIR" ] || { echo "::error::core-dir output '$CORE_OUT' != env '$PLATFORMIO_CORE_DIR'"; exit 1; }
           grep -q . "$PLATFORMIO_CORE_DIR/.platforms" || { echo "::error::.platforms is empty"; exit 1; }
+          # blink has an [env:native] beside its ESP32 envs. native must not reach
+          # the key, or blink's core would differ from a project without one.
+          if grep -qE '(^|/)native' "$PLATFORMIO_CORE_DIR/.platforms"; then
+            echo "::error::native leaked into the core key:"; cat "$PLATFORMIO_CORE_DIR/.platforms"; exit 1
+          fi
+          grep -q 'pioarduino/platform-espressif32' "$PLATFORMIO_CORE_DIR/.platforms" \
+            || { echo "::error::the ESP32 platform is missing from the core key"; exit 1; }
           # PlatformIO itself has to agree, or the isolation is only on paper.
           pio system info | tee info.txt
           grep -F "$PLATFORMIO_CORE_DIR" info.txt
