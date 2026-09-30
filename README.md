@@ -73,6 +73,8 @@ runners without the package cache) points `PLATFORMIO_CORE_DIR` at
 `~/.platformio-cores/<hash of the platform lines>`, so each platform gets its own
 toolchains. The cost is a cold install the first time a platform is used, and
 about 2.5 GB of disk per platform. Cores no job has used for 30 days are deleted.
+`platform = native` doesn't count toward the hash: it installs no toolchain, so a
+project with a host-test env shares its core with one that has none.
 
 **Projects differ, and the workflow bends rather than forking.** The version
 macros are a template — `-DFW_VERSION='"{version}"' -DFW_TYPE='"{type}"'

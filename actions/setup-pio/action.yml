@@ -53,6 +53,10 @@ inputs:
       runner failed with "Missing toolchain directory". A core per platform
       costs a cold install the first time a platform is used and ~2.5 GB of disk
       per platform; cores unused for 30 days are removed.
+
+      `platform = native` is left out of the key. It builds with the host
+      compiler and installs no toolchain that could collide, so a project with
+      a host-test env shares a core with one that has none.
     default: auto
 
 outputs:
@@ -141,10 +145,19 @@ runs:
         # Every `platform =` value, comments and trailing space stripped, in a
         # stable order. Two projects on the same platform share a core; any
         # difference in the line -- a version bump, a trial URL -- gets its own.
+        #
+        # `native` is dropped, in any spelling (`native`, `native@1.2.1`,
+        # `platformio/native @ ^1.2.1`). It installs no toolchain, so it cannot
+        # collide -- but counting it gave lp-p2p, identical to hub apart from its
+        # host-test env, a second 2.5 GB copy of the same ESP32 toolchain.
+        # `|| true`: grep -v exits 1 when nothing survives, as in a project whose
+        # only env is native, and pipefail would otherwise end the step.
         platforms=""
         if [ -f "$ini" ]; then
           platforms=$(sed -nE 's/^[[:space:]]*platform[[:space:]]*=[[:space:]]*([^;#]*).*/\1/p' "$ini" \
-                      | sed -E 's/[[:space:]]+$//' | sort -u)
+                      | sed -E 's/[[:space:]]+$//' \
+                      | { grep -vE '^(platformio/)?native([[:space:]]*@.*)?$' || true; } \
+                      | sort -u)
         fi
         if command -v sha256sum >/dev/null; then hash=sha256sum; else hash="shasum -a 256"; fi
         key=$(printf '%s\n' "$platforms" | $hash | cut -c1-12)
