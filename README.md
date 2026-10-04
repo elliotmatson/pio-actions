@@ -28,6 +28,27 @@ Grant `contents: write` on the calling job if it will ever produce a release;
 the release job inherits that rather than requesting it, so a build-only caller
 can stay on `contents: read`.
 
+### Build-time secrets
+
+Values a release needs but the repository must not hold -- a telemetry
+endpoint and its credentials, say -- go in the `build-env` secret as
+`KEY=VALUE` lines. Each is masked, then exported to `pre-build-run` and the
+build, which usually writes them into a gitignored header:
+
+```yaml
+    with:
+      pre-build-run: |
+        printf '#define MQTT_URL "%s"\n' "$MQTT_URL" > src/secrets.h
+    secrets:
+      build-env: |
+        MQTT_URL=${{ secrets.MQTT_URL }}
+```
+
+Anything compiled into a published image can be read back out of it, so this
+keeps values out of the repository and the logs, not out of the firmware: use
+credentials that are safe to be public (write-only, narrowly scoped). The
+size-diff baseline is built without them, so their bytes show in the diff.
+
 ## What it does differently
 
 **One job per environment.** Environments come from `platformio.ini`, so adding

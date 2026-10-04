@@ -69,7 +69,7 @@ on:
           Shell to run in project-dir before `pio run`. PIO_ENV, FW_VERSION and
           RELEASE_TYPE are exported, so a hook can act per environment or only
           for a release -- creating the tag that ESP-IDF derives PROJECT_VER
-          from, for instance.
+          from, for instance -- along with anything in the build-env secret.
         type: string
         default: ""
       post-build-run:
@@ -130,6 +130,14 @@ on:
     secrets:
       gh-token:
         description: Token for private lib_deps. Omit if all deps are public.
+        required: false
+      build-env:
+        description: >-
+          KEY=VALUE lines exported (masked) to the pre-build hook and the
+          build, for values a release needs but the repository must not hold:
+          a telemetry endpoint and its credentials, say. Usually turned into
+          a gitignored header by pre-build-run. Not given to the size-diff
+          baseline build, so its bytes show in the diff.
         required: false
     outputs:
       version:
@@ -251,6 +259,28 @@ jobs:
           cache: ${{ inputs.cache }}
           cache-packages: ${{ inputs.cache-packages }}
           gh-token: ${{ secrets.gh-token }}
+
+      # Each value is masked before it is exported, so it never appears in a
+      # log even if a hook echoes it. Values are single lines.
+      - name: Load build environment
+        env:
+          BUILD_ENV: ${{ secrets.build-env }}
+        run: |
+          set -euo pipefail
+          [ -n "${BUILD_ENV:-}" ] || exit 0
+          while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            case "$line" in ''|'#'*) continue ;; esac
+            key="${line%%=*}"
+            value="${line#*=}"
+            if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || [ "$key" = "$line" ]; then
+              echo "::error::build-env: not KEY=VALUE (key '${key:0:20}')"
+              exit 1
+            fi
+            [ -n "$value" ] && echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+            echo "exported $key"
+          done <<< "$BUILD_ENV"
 
       # Substituted in Python rather than the shell: the default template
       # carries nested quotes that the shell would have to escape twice.
