@@ -52,9 +52,12 @@ CHIP_IDS = {
     0x0012: "esp32p4",
     0x0014: "esp32c61",
     0x0017: "esp32c5",
+    0x0019: "esp32h21",
+    0x001C: "esp32h4",
 }
 
-# Where the ROM loads the second-stage bootloader from (CONFIG_BOOTLOADER_OFFSET_IN_FLASH).
+# Where the ROM loads the second-stage bootloader from (CONFIG_BOOTLOADER_OFFSET_IN_FLASH);
+# matches BOOTLOADER_FLASH_OFFSET in esptool's targets/ (h21 inherits h2's 0x0).
 BOOTLOADER_OFFSETS = {
     "esp32": 0x1000,
     "esp32s2": 0x1000,
@@ -66,12 +69,17 @@ BOOTLOADER_OFFSETS = {
     "esp32c61": 0x0,
     "esp32p4": 0x2000,
     "esp32c5": 0x2000,
+    "esp32h21": 0x0,
+    "esp32h4": 0x2000,
 }
 
 # Partition types and subtypes (esp_partition.h).
 TYPE_APP, TYPE_DATA = 0x00, 0x01
 SUBTYPE_FACTORY, SUBTYPE_OTA_0 = 0x00, 0x10
 SUBTYPE_SPIFFS, SUBTYPE_LITTLEFS = 0x82, 0x83
+
+# Kinds a flasher cannot do without: a null chip or offset for these fails the release.
+REQUIRED_KINDS = ("app", "bootloader", "partitions")
 
 # Staged suffix -> kind. '' is the app image. Order is the order assets are listed.
 SUFFIXES = (
@@ -197,6 +205,9 @@ def env_assets(dist: str, env: str, version: str) -> list[dict]:
     }
 
     # The factory image is the build system's own answer to "what goes where".
+    # Only parts it contains can be verified; filesystem images never are.
+    verified: dict[str, bool] = {}
+    expected_bootloader = offsets["bootloader"]
     if "factory" in files:
         factory = files["factory"][1]
         for kind in ("bootloader", "partitions", "app"):
@@ -206,10 +217,16 @@ def env_assets(dist: str, env: str, version: str) -> list[dict]:
             if found is None:
                 warn(f"{env}: {kind} not found inside the factory image; keeping "
                      f"{_hex(offsets[kind])}")
-            elif found != offsets[kind]:
-                warn(f"{env}: {kind} sits at {found:#x} in the factory image, not "
-                     f"{_hex(offsets[kind])}; using {found:#x}")
-                offsets[kind] = found
+            else:
+                if found != offsets[kind]:
+                    warn(f"{env}: {kind} sits at {found:#x} in the factory image, not "
+                         f"{_hex(offsets[kind])}; using {found:#x}")
+                    offsets[kind] = found
+                verified[kind] = True
+        # The factory image starts at 0x0 if the bootloader is where the chip puts it.
+        verified["factory"] = (verified.get("bootloader", False)
+                               and expected_bootloader is not None
+                               and offsets["bootloader"] == expected_bootloader)
 
     for kind in ("bootloader", "app", "littlefs", "spiffs"):
         if kind in files and offsets[kind] is None:
@@ -228,7 +245,21 @@ def env_assets(dist: str, env: str, version: str) -> list[dict]:
             "offset": offsets[kind],
             "size": len(data),
             "sha256": sha256(data),
+            # True only when the offset was confirmed against the factory image.
+            "verified": verified.get(kind, False),
         })
+    return out
+
+
+def problems(assets: list[dict]) -> list[str]:
+    """Assets a flasher could not place: required kinds missing a chip or an offset."""
+    out = []
+    for a in assets:
+        if a["kind"] not in REQUIRED_KINDS:
+            continue
+        missing = [f for f in ("chip", "offset") if a[f] is None]
+        if missing:
+            out.append(f"{a['name']}: no {' or '.join(missing)}")
     return out
 
 
@@ -264,15 +295,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--output", default="", help="defaults to <dist>/manifest.json")
     args = ap.parse_args(argv)
 
-    envs = json.loads(args.envs)
+    try:
+        envs = json.loads(args.envs)
+    except json.JSONDecodeError:
+        envs = None
     if not isinstance(envs, list) or not all(isinstance(e, str) for e in envs):
-        print("::error::--envs must be a JSON array of strings")
+        print(f"::error::--envs must be a JSON array of strings, got {args.envs!r}")
         return 1
 
     manifest = build_manifest(args.dist, envs, args.version, args.release_type,
                               args.repo, args.sha)
     if not manifest["assets"]:
         print(f"::error::no assets for {envs} at {args.version} in {args.dist}")
+        return 1
+    bad = problems(manifest["assets"])
+    for msg in bad:
+        print(f"::error::{msg}")
+    if bad:
+        # Publishing these would hand a flasher a file it cannot place.
         return 1
 
     output = args.output or os.path.join(args.dist, "manifest.json")

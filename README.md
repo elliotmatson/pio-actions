@@ -128,10 +128,16 @@ against the exact image (`esp-coredump info_corefile -t raw -c dump.bin
 its env, kind (`app`, `bootloader`, `partitions`, `factory`, `elf`, or
 `littlefs`/`spiffs`), chip, flash offset, size and sha256, so a flashing tool
 reads what each file is rather than parsing names. It is derived from the
-published files alone: the chip from the image header, the app offset from the
-partition table, and every offset checked against where the factory image
-actually holds that part. Both are covered by `SHA256SUMS`, and `release-elf:
-false` / `release-manifest: false` turn them off.
+published files alone: the chip from the image header, the bootloader offset
+from the chip, the partition table at 0x8000, and the app and filesystem
+offsets from the partition table. Where a factory image exists, the bootloader,
+partition table and app offsets are checked against where it actually holds
+those bytes (it wins on a disagreement), and each asset's `verified` says
+whether that happened; filesystem offsets are never verified. The release fails
+if an app, bootloader or partition table has no known chip or offset. The ELF
+is staged only for `stable` and `beta` releases. Both files are covered by
+`SHA256SUMS`, and `release-elf: false` / `release-manifest: false` turn them
+off.
 
 ```json
 {
@@ -140,9 +146,10 @@ false` / `release-manifest: false` turn them off.
   "assets": [
     {"name": "clx-dp02-v5.0.0-b5-bootloader.bin", "env": "clx-dp02",
      "kind": "bootloader", "chip": "esp32s2", "offset": 4096,
-     "size": 15760, "sha256": "f69658a7..."},
+     "size": 15760, "sha256": "f69658a7...", "verified": true},
     {"name": "clx-dp02-v5.0.0-b5.elf", "env": "clx-dp02", "kind": "elf",
-     "chip": "esp32s2", "offset": null, "size": 9123456, "sha256": "..."}
+     "chip": "esp32s2", "offset": null, "size": 9123456, "sha256": "...",
+     "verified": false}
   ]
 }
 ```

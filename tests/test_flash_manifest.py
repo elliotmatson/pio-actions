@@ -10,6 +10,7 @@ from scripts.flash_manifest import (
     chip_from_image,
     main,
     parse_partition_table,
+    problems,
 )
 from scripts.size_diff import load_manifests
 
@@ -105,6 +106,11 @@ def test_esp32_release_with_factory_and_elf(tmp_path):
     assert kinds["app"]["sha256"] == hashlib.sha256(app).hexdigest()
     assert kinds["app"]["size"] == len(app)
     assert kinds["elf"]["name"] == "hub-v1.0.0.elf"
+    assert {k: v["verified"] for k, v in kinds.items()} == {
+        "bootloader": True, "partitions": True, "app": True,
+        "factory": True, "elf": False,
+    }
+    assert problems(m["assets"]) == []
 
 
 def test_s3_bootloader_goes_at_zero(tmp_path):
@@ -164,3 +170,44 @@ def test_main_writes_manifest_json_that_size_tools_ignore(tmp_path):
 
 def test_main_fails_when_nothing_matches(tmp_path):
     assert main(["--dist", str(tmp_path), "--envs", '["hub"]', "--version", "v1"]) == 1
+
+
+def test_without_a_factory_image_nothing_is_verified(tmp_path):
+    stage(tmp_path, "s3", "v2", app=image(CHIP_S3), bootloader=image(CHIP_S3),
+          partitions=OTA_TABLE, littlefs=b"\0" * 8)
+    kinds = by_kind(build_manifest(str(tmp_path), ["s3"], "v2"), "s3")
+    assert not any(a["verified"] for a in kinds.values())
+
+
+@pytest.mark.parametrize("chip_id,chip,offset", [(25, "esp32h21", 0x0), (28, "esp32h4", 0x2000)])
+def test_newer_chips(tmp_path, chip_id, chip, offset):
+    stage(tmp_path, "n", "v1", bootloader=image(chip_id))
+    boot = by_kind(build_manifest(str(tmp_path), ["n"], "v1"), "n")["bootloader"]
+    assert (boot["chip"], boot["offset"]) == (chip, offset)
+
+
+def test_unknown_chip_fails_the_release(tmp_path, capsys):
+    stage(tmp_path, "x", "v1", app=image(0x7777), bootloader=image(0x7777),
+          partitions=OTA_TABLE)
+    assert main(["--dist", str(tmp_path), "--envs", '["x"]', "--version", "v1"]) == 1
+    out = capsys.readouterr().out
+    assert "::error::x-v1-bootloader.bin: no chip or offset" in out
+    assert "::error::x-v1.bin: no chip" in out
+
+
+def test_corrupt_partition_table_fails_the_release(tmp_path, capsys):
+    stage(tmp_path, "c", "v1", app=image(CHIP_ESP32), partitions=b"\x12\x34" + b"\0" * 62)
+    assert main(["--dist", str(tmp_path), "--envs", '["c"]', "--version", "v1"]) == 1
+    assert "::error::c-v1.bin: no offset" in capsys.readouterr().out
+    assert not (tmp_path / "manifest.json").exists()
+
+
+def test_a_null_elf_offset_is_fine(tmp_path):
+    stage(tmp_path, "e", "v1", app=image(CHIP_ESP32), partitions=OTA_TABLE, elf=b"\x7fELF")
+    assert main(["--dist", str(tmp_path), "--envs", '["e"]', "--version", "v1"]) == 0
+
+
+@pytest.mark.parametrize("envs", ["not json", '{"a": 1}', "[1, 2]", ""])
+def test_malformed_envs_is_an_error_line_not_a_traceback(tmp_path, capsys, envs):
+    assert main(["--dist", str(tmp_path), "--envs", envs, "--version", "v1"]) == 1
+    assert capsys.readouterr().out.startswith("::error::--envs must be a JSON array")

@@ -93,8 +93,8 @@ on:
         default: 30
       release-elf:
         description: >-
-          Stage firmware.elf as <env>-<version>.elf alongside the binaries and
-          attach it to releases, so a backtrace or core dump from the field can
+          On stable and beta releases, stage firmware.elf as
+          <env>-<version>.elf alongside the binaries and attach it, so a backtrace or core dump from the field can
           be decoded against exactly the image that produced it.
         type: boolean
         default: true
@@ -373,7 +373,9 @@ jobs:
         env:
           ENV_NAME: ${{ matrix.env }}
           VERSION: ${{ needs.discover.outputs.version }}
-          STAGE_ELF: ${{ inputs.release-elf }}
+          # Only a release keeps the ELF: on pull requests and plain builds it
+          # would add megabytes to every artifact and to the size-diff download.
+          STAGE_ELF: ${{ inputs.release-elf && (inputs.release-type == 'stable' || inputs.release-type == 'beta') }}
         run: |
           set -euo pipefail
           mkdir -p dist
