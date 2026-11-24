@@ -119,7 +119,16 @@ build succeeded.
 alongside the app image — bootloader, partition table and application already
 combined at their flash offsets. The per-repo workflows left it in the build
 directory, so flashing a board from a release meant three files and three
-offsets. It is now published as `<env>-<version>-factory.bin`.
+offsets. It is now published as `<env>-<version>-factory.bin`. It is for a blank
+board: the gaps between those pieces are 0xFF, NVS included, so writing it at
+`0x0` also erases a configured board's settings.
+
+**So does `boot_app0.bin`.** To reflash a board in use without erasing its
+settings, write bootloader, partitions and app separately -- plus
+`<env>-<version>-boot_app0.bin` at the otadata offset (`0xe000` in the default
+partition table). Without it, a board whose last OTA update went into the second
+app slot keeps booting that slot, and the app just written never runs. Arduino
+projects only; it comes from the framework package.
 
 **Pull requests get a size diff.** On a `pull_request`, the workflow also
 builds the base commit and posts a comment with the flash, RAM and image delta
