@@ -116,8 +116,9 @@ itself. The remote tag is still created by the release job, and only if the
 build succeeded.
 
 **The merged image ships too.** pioarduino writes a `firmware.factory.bin`
-alongside the app image — bootloader, partition table and application already
-combined at their flash offsets. The per-repo workflows left it in the build
+alongside the app image — bootloader, partition table, boot-slot selection
+(otadata, the same bytes as `boot_app0.bin`) and application already combined at
+their flash offsets. The per-repo workflows left it in the build
 directory, so flashing a board from a release meant three files and three
 offsets. It is now published as `<env>-<version>-factory.bin`. It is for a blank
 board: the gaps between those pieces are 0xFF, NVS included, so writing it at
