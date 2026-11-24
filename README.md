@@ -125,12 +125,12 @@ offsets. It is now published as `<env>-<version>-factory.bin`.
 published as `<env>-<version>.elf`, so a crash from the field can be decoded
 against the exact image (`esp-coredump info_corefile -t raw -c dump.bin
 <env>-<version>.elf`). A release-wide `manifest.json` lists every asset with
-its env, kind (`app`, `bootloader`, `partitions`, `factory`, `elf`, or
-`littlefs`/`spiffs`), chip, flash offset, size and sha256, so a flashing tool
+its env, kind (`app`, `bootloader`, `partitions`, `factory`, `elf`,
+`otadata` for `-boot_app0.bin`, or `littlefs`/`spiffs`), chip, flash offset, size and sha256, so a flashing tool
 reads what each file is rather than parsing names. It is derived from the
 published files alone: the chip from the image header, the bootloader offset
 from the chip, the partition table at 0x8000, and the app and filesystem
-offsets from the partition table. Where a factory image exists, the bootloader,
+offsets (and otadata's) from the partition table. Where a factory image exists, the bootloader,
 partition table and app offsets are checked against where it actually holds
 those bytes (it wins on a disagreement), and each asset's `verified` says
 whether that happened; filesystem offsets are never verified. The release fails

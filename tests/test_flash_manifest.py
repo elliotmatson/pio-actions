@@ -136,6 +136,27 @@ def test_factory_image_overrides_a_moved_partition_table(tmp_path, capsys):
     assert "partitions sits at 0xa000" in capsys.readouterr().err
 
 
+def test_boot_app0_goes_in_the_otadata_partition(tmp_path):
+    boot, app = image(CHIP_S2, b"b" * 64), image(CHIP_S2, b"a" * 64)
+    otadata = b"\x01" + b"\0" * 27 + b"\xff" * 4 + b"\xff" * (0x2000 - 32)
+    (tmp_path / "s2-v4-boot_app0.bin").write_bytes(otadata)
+    stage(tmp_path, "s2", "v4", app=app, bootloader=boot, partitions=OTA_TABLE,
+          factory=factory({0x1000: boot, 0x8000: OTA_TABLE, 0xE000: otadata, 0x10000: app}))
+    m = build_manifest(str(tmp_path), ["s2"], "v4")
+    ota = by_kind(m, "s2")["otadata"]
+    assert ota["name"] == "s2-v4-boot_app0.bin"
+    assert ota["offset"] == 0xE000 and ota["verified"] is True and ota["chip"] == "esp32s2"
+    assert problems(m["assets"]) == []
+
+
+def test_boot_app0_without_a_partition_table_warns(tmp_path, capsys):
+    (tmp_path / "s2-v4-boot_app0.bin").write_bytes(b"\xff" * 0x2000)
+    stage(tmp_path, "s2", "v4", app=image(CHIP_S2))
+    m = build_manifest(str(tmp_path), ["s2"], "v4")
+    assert by_kind(m, "s2")["otadata"]["offset"] is None
+    assert "no flash offset known for s2-v4-boot_app0.bin" in capsys.readouterr().err
+
+
 def test_filesystem_image_is_placed_in_its_partition(tmp_path):
     stage(tmp_path, "fs", "v1", app=image(CHIP_ESP32), partitions=OTA_TABLE,
           littlefs=b"\0" * 64)

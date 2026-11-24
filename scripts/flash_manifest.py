@@ -77,6 +77,7 @@ BOOTLOADER_OFFSETS = {
 TYPE_APP, TYPE_DATA = 0x00, 0x01
 SUBTYPE_FACTORY, SUBTYPE_OTA_0 = 0x00, 0x10
 SUBTYPE_SPIFFS, SUBTYPE_LITTLEFS = 0x82, 0x83
+SUBTYPE_OTADATA = 0x00  # data partition subtype "ota"
 
 # Kinds a flasher cannot do without: a null chip or offset for these fails the release.
 REQUIRED_KINDS = ("app", "bootloader", "partitions")
@@ -88,6 +89,7 @@ SUFFIXES = (
     (".bin", "app"),
     ("-littlefs.bin", "littlefs"),
     ("-spiffs.bin", "spiffs"),
+    ("-boot_app0.bin", "otadata"),  # otadata image selecting ota_0; NVS untouched
     ("-factory.bin", "factory"),
     (".elf", "elf"),
 )
@@ -139,6 +141,14 @@ def fs_offset(rows: list[dict], kind: str) -> int | None:
         for r in rows:
             if r["type"] == TYPE_DATA and r["subtype"] == subtype:
                 return r["offset"]
+    return None
+
+
+def otadata_offset(rows: list[dict]) -> int | None:
+    """The otadata partition (data, subtype ota), where boot_app0.bin goes."""
+    for r in rows:
+        if r["type"] == TYPE_DATA and r["subtype"] == SUBTYPE_OTADATA:
+            return r["offset"]
     return None
 
 
@@ -200,6 +210,7 @@ def env_assets(dist: str, env: str, version: str) -> list[dict]:
         "app": app_offset(rows) if rows else None,
         "littlefs": fs_offset(rows, "littlefs") if rows else None,
         "spiffs": fs_offset(rows, "spiffs") if rows else None,
+        "otadata": otadata_offset(rows) if rows else None,
         "factory": 0x0,
         "elf": None,  # not flashed; for decoding backtraces and core dumps
     }
@@ -223,12 +234,17 @@ def env_assets(dist: str, env: str, version: str) -> list[dict]:
                          f"{_hex(offsets[kind])}; using {found:#x}")
                     offsets[kind] = found
                 verified[kind] = True
+        # Arduino merges boot_app0 into the factory image; verify it when it is there,
+        # without warning when it isn't.
+        if "otadata" in files and offsets["otadata"] is not None:
+            found = locate(factory, files["otadata"][1], offsets["otadata"])
+            verified["otadata"] = found == offsets["otadata"]
         # The factory image starts at 0x0 if the bootloader is where the chip puts it.
         verified["factory"] = (verified.get("bootloader", False)
                                and expected_bootloader is not None
                                and offsets["bootloader"] == expected_bootloader)
 
-    for kind in ("bootloader", "app", "littlefs", "spiffs"):
+    for kind in ("bootloader", "app", "littlefs", "spiffs", "otadata"):
         if kind in files and offsets[kind] is None:
             warn(f"{env}: no flash offset known for {files[kind][0]}")
 
