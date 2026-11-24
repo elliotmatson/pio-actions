@@ -116,10 +116,20 @@ itself. The remote tag is still created by the release job, and only if the
 build succeeded.
 
 **The merged image ships too.** pioarduino writes a `firmware.factory.bin`
-alongside the app image — bootloader, partition table and application already
-combined at their flash offsets. The per-repo workflows left it in the build
+alongside the app image — bootloader, partition table, boot-slot selection
+(otadata, the same bytes as `boot_app0.bin`) and application already combined at
+their flash offsets. The per-repo workflows left it in the build
 directory, so flashing a board from a release meant three files and three
-offsets. It is now published as `<env>-<version>-factory.bin`.
+offsets. It is now published as `<env>-<version>-factory.bin`. It is for a blank
+board: the gaps between those pieces are 0xFF, NVS included, so writing it at
+`0x0` also erases a configured board's settings.
+
+**So does `boot_app0.bin`.** To reflash a board in use without erasing its
+settings, write bootloader, partitions and app separately -- plus
+`<env>-<version>-boot_app0.bin` at the otadata offset (`0xe000` in the default
+partition table). Without it, a board whose last OTA update went into the second
+app slot keeps booting that slot, and the app just written never runs. Arduino
+projects only; it comes from the framework package.
 
 **So are the ELF and a flashing manifest.** Each env's `firmware.elf` is
 published as `<env>-<version>.elf`, so a crash from the field can be decoded

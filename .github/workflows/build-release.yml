@@ -392,11 +392,27 @@ jobs:
 
           stage firmware.bin ""
           # pioarduino already merges bootloader + partitions + app into a
-          # single flashable image. Publishing it saves consumers an esptool
-          # merge_bin step and makes a field flash one file instead of three.
+          # single flashable image, for a blank board. Not for a board in use:
+          # it fills every gap between those pieces with 0xFF, NVS included, so
+          # writing it at 0x0 also erases the device's settings.
           stage firmware.factory.bin factory
           stage bootloader.bin bootloader
           stage partitions.bin partitions
+          # The otadata image that selects the first app slot. Writing the app
+          # to 0x10000 alone leaves otadata as it was, so on a board whose last
+          # OTA update went into the second slot the freshly flashed app never
+          # runs; this (at the otadata offset, 0xe000 in the default table)
+          # resets that without touching NVS. Not in the build directory --
+          # pioarduino keeps it in the Arduino framework package.
+          if [ -f "$build/bootloader.bin" ]; then
+            core="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
+            shopt -s nullglob
+            boot_app0=("$core"/packages/framework-arduinoespressif32*/tools/partitions/boot_app0.bin)
+            shopt -u nullglob
+            if [ "${#boot_app0[@]}" -gt 0 ]; then
+              cp -v "${boot_app0[0]}" "dist/${ENV_NAME}-${VERSION}-boot_app0.bin"
+            fi
+          fi
           stage littlefs.bin littlefs
           stage spiffs.bin spiffs
           # The symbols for decoding crashes: `esp-coredump info_corefile -t raw
