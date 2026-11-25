@@ -368,6 +368,46 @@ jobs:
           project-dir: ${{ inputs.project-dir }}
           output: ${{ inputs.project-dir }}/dist/${{ matrix.env }}-manifest.json
 
+      # Seed the size baseline for later pull requests. base-size looks its
+      # manifest up by the merge-base commit, and a cache saved from a pull
+      # request run is only visible to that pull request, so every first PR on
+      # a new base rebuilt the baseline from scratch. A build of the default
+      # branch saves the same manifest under the key a PR whose merge base is
+      # this commit will ask for. Keep the key in step with base-size below.
+      # Skipped when the head build is not comparable to what base-size would
+      # build: base-size gets neither the build-env secret nor the pre-build
+      # hook, so a main build that used them would seed numbers the PR build
+      # could not reproduce.
+      - name: Stage the size baseline for later pull requests
+        id: seed
+        if: >-
+          inputs.size-diff && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+          && inputs.release-type == 'build'
+        env:
+          BUILD_ENV: ${{ secrets.build-env }}
+          PRE_BUILD: ${{ inputs.pre-build-run }}
+          ENV_NAME: ${{ matrix.env }}
+          PROJECT_DIR: ${{ inputs.project-dir }}
+        run: |
+          set -euo pipefail
+          if [ -n "$BUILD_ENV" ] || [ -n "$PRE_BUILD" ]; then
+            echo "::notice::not seeding the size baseline: this build used build-env or a pre-build hook, which the baseline build does not"
+            exit 0
+          fi
+          mkdir -p base-manifests
+          cp "$PROJECT_DIR/dist/$ENV_NAME-manifest.json" "base-manifests/$ENV_NAME-manifest.json"
+          echo "seed=true" >> "$GITHUB_OUTPUT"
+
+      # An existing key is left alone (caches are immutable), which makes a
+      # re-run of the same commit a no-op.
+      - name: Save the size baseline
+        if: steps.seed.outputs.seed == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: base-manifests
+          key: size-base-s2-${{ runner.os }}-${{ matrix.env }}-${{ github.sha }}
+
       - name: Stage artifacts
         working-directory: ${{ inputs.project-dir }}
         env:
@@ -446,6 +486,12 @@ jobs:
     steps:
       # Keyed on the base commit, so the baseline is built once per PR rather
       # than again on every push to the branch.
+      # Builds of the default branch save under the same key (see the build
+      # job), so a PR based on a commit that main built hits without building.
+      # There is deliberately no restore-keys fallback: the baseline must be
+      # the merge base itself. The nearest older entry would be a different
+      # commit, and the diff would report the commits in between as this PR's
+      # change.
       # The s2 in the key is a manifest-schema token. Bump it whenever the
       # manifest's shape changes: a cached baseline of the old shape diffed
       # against a new-shape head invents differences that are not real.
